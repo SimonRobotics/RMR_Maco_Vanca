@@ -16,9 +16,12 @@ void robot::initAndStartRobot(std::string ipaddress)
 
     forwardspeed=0;
     rotationspeed=0;
-    robot::x = 0;
-    robot::y = 0;
-    robot::fi = 0;
+    x = 0;
+    y = 0;
+    fi = 0;
+    lastValueLeft = 0;
+    lastValueRight = 0;
+
     ///setovanie veci na komunikaciu s robotom/lidarom/kamerou.. su tam adresa porty a callback.. laser ma ze sa da dat callback aj ako lambda.
     /// lambdy su super, setria miesto a ak su rozumnej dlzky,tak aj prehladnost... ak ste o nich nic nepoculi poradte sa s vasim doktorom alebo lekarnikom...
     robotCom.setLaserParameters([this](const std::vector<LaserData>& dat)->int{return processThisLidar(dat);},ipaddress);
@@ -61,7 +64,17 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 {
 
 
-    ///tu mozete robit s datami z robota
+    ///tu mozete robit s datami z robota///
+    double lenghtTraveled = robot::getDistanceFromWhells(realDistanceTraveled(robotdata.EncoderLeft, &lastValueLeft),realDistanceTraveled(robotdata.EncoderRight, &lastValueRight));
+
+    fi = robotdata.GyroAngle/100;
+
+    double angle = qDegreesToRadians(fi);
+
+    x = x + lenghtTraveled * std::cos(angle);
+    y = y + lenghtTraveled * std::sin(angle);
+
+
 
 
 ///TU PISTE KOD... TOTO JE TO MIESTO KED NEVIETE KDE ZACAT,TAK JE TO NAOZAJ TU. AK AJ TAK NEVIETE, SPYTAJTE SA CVICIACEHO MA TU NATO STRING KTORY DA DO HLADANIA XXX
@@ -78,21 +91,10 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         /// okno pocuva vo svojom slote a vasu premennu nastavi tak ako chcete. prikaz emit to presne takto spravi
         /// viac o signal slotoch tu: https://doc.qt.io/qt-5/signalsandslots.html
         ///posielame sem nezmysli.. pohrajte sa nech sem idu zmysluplne veci
-        emit publishPosition(robotdata.EncoderLeft,robotdata.EncoderRight,robotdata.GyroAngle);
+        emit publishPosition(x,y,fi);
         ///toto neodporucam na nejake komplikovane struktury.signal slot robi kopiu dat. radsej vtedy posielajte
         /// prazdny signal a slot bude vykreslovat strukturu (vtedy ju musite mat samozrejme ako member premmennu v mainwindow.ak u niekoho najdem globalnu premennu,tak bude cistit bludisko zubnou kefkou.. kefku dodam)
         /// vtedy ale odporucam pouzit mutex, aby sa vam nestalo ze budete pocas vypisovania prepisovat niekde inde
-
-    }
-
-    if(datacounter%10==0){
-
-        double lenghtTraveled = robot::getDistanceFromWhells(robotdata.EncoderLeft,robotdata.EncoderRight);
-
-        robot::x = lenghtTraveled * std::cos(robotdata.GyroAngle);
-        robot::y = lenghtTraveled * std::sin(robotdata.GyroAngle);
-        robot::fi = robotdata.GyroAngle;
-        printf("|%lf %lf %lf|",robot::x, robot::y, robot::fi);
 
     }
     ///---tu sa posielaju rychlosti do robota... vklude zakomentujte ak si chcete spravit svoje
@@ -134,6 +136,22 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
 int robot::getDistanceFromWhells(double leftWheel, double rightWheel)
 {
     return (leftWheel+rightWheel)/2;
+}
+
+double robot::realDistanceTraveled(unsigned short encoderValue, unsigned short *LastValue)
+{
+    unsigned short last = *LastValue;
+
+    int32_t diff = (int32_t)encoderValue - (int32_t)last;
+
+    *LastValue = encoderValue;
+
+    if (diff > 32767)
+        diff -= 65536;
+    else if (diff < -32768)
+        diff += 65536;
+
+    return (double)diff;
 }
 
   #ifndef DISABLE_OPENCV

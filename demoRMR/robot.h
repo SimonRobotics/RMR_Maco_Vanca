@@ -46,6 +46,10 @@ private:
   double x;
   double y;
   double fi;
+
+  unsigned short lastValueLeft;
+  unsigned short lastValueRight;
+
   ///-----------------------------
   /// toto su rychlosti ktore sa nastavuju setSpeedVal a posielaju v
   /// processThisRobot
@@ -56,6 +60,7 @@ private:
   int processThisLidar(const std::vector<LaserData> &laserData);
   int processThisRobot(const TKobukiData &robotdata);
   int getDistanceFromWhells(double leftWheel, double rightWheel);
+  double realDistanceTraveled(unsigned short encoderValue, unsigned short *LastValue);
 #ifndef DISABLE_OPENCV
   int processThisCamera(cv::Mat cameraData);
 #endif
