@@ -13,19 +13,29 @@ qRegisterMetaType<skeleton>("skeleton");
 
 void robot::initAndStartRobot(std::string ipaddress)
 {
-
+    useDirectCommands = 0;
+    initParam = false;
     forwardspeed=0;
     rotationspeed=0;
     x = 0;
     y = 0;
     fi = 0;
-    lastValueLeft = 0;
-    lastValueRight = 0;
+
+    Position p1;
+    p1.x = 0;
+    p1.y = 3.1;
+    position_list.push_back(p1);
+
+    Position p2;
+    p2.x = 3.0;
+    p2.y = 3.1;
+    position_list.push_back(p2);
 
     ///setovanie veci na komunikaciu s robotom/lidarom/kamerou.. su tam adresa porty a callback.. laser ma ze sa da dat callback aj ako lambda.
     /// lambdy su super, setria miesto a ak su rozumnej dlzky,tak aj prehladnost... ak ste o nich nic nepoculi poradte sa s vasim doktorom alebo lekarnikom...
     robotCom.setLaserParameters([this](const std::vector<LaserData>& dat)->int{return processThisLidar(dat);},ipaddress);
-    robotCom.setRobotParameters([this](const TKobukiData& dat)->int{return processThisRobot(dat);},ipaddress);
+    robotCom.setRobotParameters([this](const TKobukiData& dat)->int{return processThisRobot(dat);},ipaddress); 
+
   #ifndef DISABLE_OPENCV
     robotCom.setCameraParameters(std::bind(&robot::processThisCamera,this,std::placeholders::_1),"http://"+ipaddress+":8000/stream.mjpg");
 #endif
@@ -63,7 +73,11 @@ void robot::setSpeed(double forw, double rots)
 int robot::processThisRobot(const TKobukiData &robotdata)
 {
 
-
+    if (!robot::initParam){
+        lastValueLeft = robotdata.EncoderLeft;
+        lastValueRight = robotdata.EncoderRight;
+        robot::initParam = true;
+    }
     ///tu mozete robit s datami z robota///
     double lenghtTraveled = robot::getDistanceFromWhells(realDistanceTraveled(robotdata.EncoderLeft, &lastValueLeft),realDistanceTraveled(robotdata.EncoderRight, &lastValueRight));
 
@@ -71,11 +85,41 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
     double angle = qDegreesToRadians(fi);
 
-    x = x + lenghtTraveled * std::cos(angle);
-    y = y + lenghtTraveled * std::sin(angle);
+    x += lenghtTraveled * std::cos(angle);
+    y += lenghtTraveled * std::sin(angle);
 
+    if (!position_list.empty()){
+        auto target = position_list.front();
 
+        double dis_e = robot::calculateDistanceError(target, x, y);
 
+        if (0.01 > dis_e){
+            forwardspeed = 0;
+            rotationspeed = 0;
+            position_list.erase(position_list.begin());
+        } else {
+            forwardspeed = 500 * dis_e;
+
+            double ang_e = robot::calculateAngleError(target, x, y, fi);
+
+            if (std::abs(ang_e) < 5){
+                rotationspeed = 0;
+            }
+            else if (std::abs(ang_e) > 45){
+                forwardspeed = 0;
+                rotationspeed = ang_e;
+            }
+            else{
+                rotationspeed = ang_e;
+            }
+        }
+    }
+    else{
+        forwardspeed = 0;
+        rotationspeed = 0;
+    }
+
+    //emit publishPosition(position_list.size(), position_list.at(1).x,position_list.at(1).y);
 
 ///TU PISTE KOD... TOTO JE TO MIESTO KED NEVIETE KDE ZACAT,TAK JE TO NAOZAJ TU. AK AJ TAK NEVIETE, SPYTAJTE SA CVICIACEHO MA TU NATO STRING KTORY DA DO HLADANIA XXX
 
@@ -115,6 +159,20 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
 }
 
+double robot::calculateDistanceError(Position setPoint, double x, double y){
+    return std::sqrt(std::pow(setPoint.x - x,2)+std::pow(setPoint.y-y,2));
+}
+
+double robot::calculateAngleError(Position setPoint, double x, double y, double fi) {
+    double desiredAngle = std::atan2(setPoint.y - y, setPoint.x - x) * 180.0 / M_PI;
+    double error = desiredAngle - fi;
+
+    // Normalize to [-180, 180]
+    while (error > 180.0) error -= 360.0;
+    while (error < -180.0) error += 360.0;
+
+    return error;
+}
 ///toto je calback na data z lidaru, ktory ste podhodili robotu vo funkcii initAndStartRobot
 /// vola sa ked dojdu nove data z lidaru
 int robot::processThisLidar(const std::vector<LaserData>& laserData)
@@ -128,12 +186,12 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     emit publishLidar(copyOfLaserData);
    // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
 
-
     return 0;
-
 }
 
-int robot::getDistanceFromWhells(double leftWheel, double rightWheel)
+
+
+double robot::getDistanceFromWhells(double leftWheel, double rightWheel)
 {
     return (leftWheel+rightWheel)/2;
 }
@@ -151,7 +209,7 @@ double robot::realDistanceTraveled(unsigned short encoderValue, unsigned short *
     else if (diff < -32768)
         diff += 65536;
 
-    return (double)diff;
+    return (double)diff*TICK_TO_METER;
 }
 
   #ifndef DISABLE_OPENCV

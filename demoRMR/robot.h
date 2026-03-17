@@ -19,6 +19,15 @@ Q_DECLARE_METATYPE(cv::Mat)
 Q_DECLARE_METATYPE(skeleton)
 #endif
 Q_DECLARE_METATYPE(std::vector<LaserData>)
+
+#define TICK_TO_METER 0.000085292090497737556558
+
+struct Position{
+    double x;
+    double y;
+};
+
+
 class robot : public QObject {
   Q_OBJECT
 public:
@@ -35,6 +44,7 @@ public:
 signals:
   void publishPosition(double x, double y, double z);
   void publishLidar(const std::vector<LaserData> &lidata);
+
 #ifndef DISABLE_OPENCV
   void publishCamera(const cv::Mat &camframe);
 #endif
@@ -43,6 +53,8 @@ signals:
 #endif
 private:
   /// toto su vase premenne na vasu odometriu
+
+    bool initParam;
   double x;
   double y;
   double fi;
@@ -59,13 +71,16 @@ private:
   /// toto su callbacky co sa sa volaju s novymi datami
   int processThisLidar(const std::vector<LaserData> &laserData);
   int processThisRobot(const TKobukiData &robotdata);
-  int getDistanceFromWhells(double leftWheel, double rightWheel);
+  double calculateDistanceError(Position setPoint, double x, double y);
+  double calculateAngleError(Position setPoint, double x, double y, double fi);
+  double getDistanceFromWhells(double leftWheel, double rightWheel);
   double realDistanceTraveled(unsigned short encoderValue, unsigned short *LastValue);
 #ifndef DISABLE_OPENCV
   int processThisCamera(cv::Mat cameraData);
 #endif
 
   /// pomocne strukutry aby ste si trosku nerobili race conditions
+  std::vector<Position> position_list;
   std::vector<LaserData> copyOfLaserData;
 #ifndef DISABLE_OPENCV
   cv::Mat frame[3];
