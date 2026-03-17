@@ -3,7 +3,6 @@
 #include "librobot/librobot.h"
 #include <QObject>
 #include <QWidget>
-
 #ifndef DISABLE_OPENCV
 #include "opencv2/core/utility.hpp"
 #include "opencv2/highgui/highgui.hpp"
@@ -21,6 +20,8 @@ Q_DECLARE_METATYPE(skeleton)
 Q_DECLARE_METATYPE(std::vector<LaserData>)
 
 #define TICK_TO_METER 0.000085292090497737556558
+#define MAX_SPEED 200 //mm / s
+#define MAX_SPEED_ANG 90 //stupen / s
 
 struct Position{
     double x;
@@ -55,9 +56,11 @@ private:
   /// toto su vase premenne na vasu odometriu
 
     bool initParam;
+    double dt;
   double x;
   double y;
   double fi;
+  int timeToRise;
 
   unsigned short lastValueLeft;
   unsigned short lastValueRight;
@@ -71,6 +74,7 @@ private:
   /// toto su callbacky co sa sa volaju s novymi datami
   int processThisLidar(const std::vector<LaserData> &laserData);
   int processThisRobot(const TKobukiData &robotdata);
+  double ramp(double target, double dt, double speed);
   double calculateDistanceError(Position setPoint, double x, double y);
   double calculateAngleError(Position setPoint, double x, double y, double fi);
   double getDistanceFromWhells(double leftWheel, double rightWheel);

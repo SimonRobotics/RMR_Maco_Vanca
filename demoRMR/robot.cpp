@@ -15,6 +15,7 @@ void robot::initAndStartRobot(std::string ipaddress)
 {
     useDirectCommands = 0;
     initParam = false;
+    dt = 20; // s
     forwardspeed=0;
     rotationspeed=0;
     x = 0;
@@ -30,6 +31,11 @@ void robot::initAndStartRobot(std::string ipaddress)
     p2.x = 3.0;
     p2.y = 3.1;
     position_list.push_back(p2);
+
+    Position p3;
+    p3.x = 3.0;
+    p3.y = 0;
+    position_list.push_back(p3);
 
     ///setovanie veci na komunikaciu s robotom/lidarom/kamerou.. su tam adresa porty a callback.. laser ma ze sa da dat callback aj ako lambda.
     /// lambdy su super, setria miesto a ak su rozumnej dlzky,tak aj prehladnost... ak ste o nich nic nepoculi poradte sa s vasim doktorom alebo lekarnikom...
@@ -79,14 +85,14 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         robot::initParam = true;
     }
     ///tu mozete robit s datami z robota///
-    double lenghtTraveled = robot::getDistanceFromWhells(realDistanceTraveled(robotdata.EncoderLeft, &lastValueLeft),realDistanceTraveled(robotdata.EncoderRight, &lastValueRight));
+    double lenghtTraveled = robot::getDistanceFromWhells(realDistanceTraveled(robotdata.EncoderLeft, &lastValueLeft),realDistanceTraveled(robotdata.EncoderRight, &lastValueRight)); // m
 
-    fi = robotdata.GyroAngle/100;
+    fi = robotdata.GyroAngle/100; // rad
 
-    double angle = qDegreesToRadians(fi);
+    double angle = qDegreesToRadians(fi); //stupne
 
-    x += lenghtTraveled * std::cos(angle);
-    y += lenghtTraveled * std::sin(angle);
+    x += lenghtTraveled * std::cos(angle); //m
+    y += lenghtTraveled * std::sin(angle); //m
 
     if (!position_list.empty()){
         auto target = position_list.front();
@@ -98,28 +104,30 @@ int robot::processThisRobot(const TKobukiData &robotdata)
             rotationspeed = 0;
             position_list.erase(position_list.begin());
         } else {
-            forwardspeed = 500 * dis_e;
+            if (dis_e*2*MAX_SPEED > MAX_SPEED){
+                forwardspeed = robot::ramp(MAX_SPEED,dt,forwardspeed);
+            }else{
+                forwardspeed = robot::ramp(dis_e*2*MAX_SPEED,dt,forwardspeed);
+            }
+        }
 
-            double ang_e = robot::calculateAngleError(target, x, y, fi);
+        double ang_e = robot::calculateAngleError(target, x, y, fi);
 
-            if (std::abs(ang_e) < 5){
-                rotationspeed = 0;
-            }
-            else if (std::abs(ang_e) > 45){
-                forwardspeed = 0;
-                rotationspeed = ang_e;
-            }
-            else{
-                rotationspeed = ang_e;
-            }
+        if (std::abs(ang_e) < 5){
+            rotationspeed = 0;
+        }
+        else if (std::abs(ang_e) > 45){
+            forwardspeed = 0;
+            rotationspeed = 0.1*ang_e;
+        }
+        else{
+            rotationspeed = 0.1*ang_e;
         }
     }
     else{
         forwardspeed = 0;
         rotationspeed = 0;
     }
-
-    //emit publishPosition(position_list.size(), position_list.at(1).x,position_list.at(1).y);
 
 ///TU PISTE KOD... TOTO JE TO MIESTO KED NEVIETE KDE ZACAT,TAK JE TO NAOZAJ TU. AK AJ TAK NEVIETE, SPYTAJTE SA CVICIACEHO MA TU NATO STRING KTORY DA DO HLADANIA XXX
 
@@ -167,7 +175,6 @@ double robot::calculateAngleError(Position setPoint, double x, double y, double 
     double desiredAngle = std::atan2(setPoint.y - y, setPoint.x - x) * 180.0 / M_PI;
     double error = desiredAngle - fi;
 
-    // Normalize to [-180, 180]
     while (error > 180.0) error -= 360.0;
     while (error < -180.0) error += 360.0;
 
@@ -189,7 +196,17 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     return 0;
 }
 
+double robot::ramp(double target, double dt, double speed){
 
+    if(target-0.1 > speed){
+        speed += dt;
+    }
+    else{
+        speed = target;
+    }
+
+    return speed;
+}
 
 double robot::getDistanceFromWhells(double leftWheel, double rightWheel)
 {
