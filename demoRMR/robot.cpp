@@ -15,7 +15,7 @@ void robot::initAndStartRobot(std::string ipaddress)
 {
     useDirectCommands = 0;
     initParam = false;
-    dt = 20; // s
+    dt = 10; // s
     forwardspeed=0;
     rotationspeed=0;
     x = 0;
@@ -23,18 +23,18 @@ void robot::initAndStartRobot(std::string ipaddress)
     fi = 0;
 
     Position p1;
-    p1.x = 0;
-    p1.y = 3.1;
+    p1.x = 4.0;
+    p1.y = 0;
     position_list.push_back(p1);
 
     Position p2;
-    p2.x = 3.0;
-    p2.y = 3.1;
+    p2.x = 4.0;
+    p2.y = -2.5;
     position_list.push_back(p2);
 
     Position p3;
-    p3.x = 3.0;
-    p3.y = 0;
+    p3.x = 0;
+    p3.y = -2.5;
     position_list.push_back(p3);
 
     ///setovanie veci na komunikaciu s robotom/lidarom/kamerou.. su tam adresa porty a callback.. laser ma ze sa da dat callback aj ako lambda.
@@ -118,10 +118,10 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         }
         else if (std::abs(ang_e) > 45){
             forwardspeed = 0;
-            rotationspeed = 0.1*ang_e;
+            rotationspeed = 0.01*ang_e;
         }
         else{
-            rotationspeed = 0.1*ang_e;
+            rotationspeed = 0.01*ang_e;
         }
     }
     else{
