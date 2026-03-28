@@ -3,6 +3,8 @@
 #include "librobot/librobot.h"
 #include <QObject>
 #include <QWidget>
+#include <queue>
+
 #ifndef DISABLE_OPENCV
 #include "opencv2/core/utility.hpp"
 #include "opencv2/highgui/highgui.hpp"
@@ -28,6 +30,12 @@ struct Position{
     double y;
 };
 
+struct TimePosition{
+    double timeStamp;
+    double angle;
+    Position pos;
+};
+
 
 class robot : public QObject {
   Q_OBJECT
@@ -42,8 +50,11 @@ public:
   void setSpeedVal(double forw, double rots);
   // tato funkcia fyzicky posiela hodnoty do robota
   void setSpeed(double forw, double rots);
+  void setState(int state);
+
 signals:
   void publishPosition(double x, double y, double z);
+  void publishMapPoint(double x, double y);
   void publishLidar(const std::vector<LaserData> &lidata);
 
 #ifndef DISABLE_OPENCV
@@ -57,13 +68,13 @@ private:
 
     bool initParam;
     double dt;
-  double x;
-  double y;
-  double fi;
-  int timeToRise;
+  double gyroOffSet;
+  int map[14*50][14*50];
+  int state;
 
   unsigned short lastValueLeft;
   unsigned short lastValueRight;
+
 
   ///-----------------------------
   /// toto su rychlosti ktore sa nastavuju setSpeedVal a posielaju v
@@ -79,12 +90,17 @@ private:
   double calculateAngleError(Position setPoint, double x, double y, double fi);
   double getDistanceFromWhells(double leftWheel, double rightWheel);
   double realDistanceTraveled(unsigned short encoderValue, unsigned short *LastValue);
+  double interpolate(double x1, double x2, double t1, double t2, double t);
+  double interpolateAngle(double a1, double a2, double t1, double t2, double t);
 #ifndef DISABLE_OPENCV
   int processThisCamera(cv::Mat cameraData);
 #endif
 
   /// pomocne strukutry aby ste si trosku nerobili race conditions
-  std::vector<Position> position_list;
+  queue<Position> position_list;
+
+  std::vector<TimePosition> pastPositions;
+
   std::vector<LaserData> copyOfLaserData;
 #ifndef DISABLE_OPENCV
   cv::Mat frame[3];

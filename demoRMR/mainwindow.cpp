@@ -18,8 +18,14 @@ MainWindow::MainWindow(QWidget *parent) :
 
     //tu je napevno nastavena ip. treba zmenit na to co ste si zadali do text boxu alebo nejaku inu pevnu. co bude spravna
     ipaddress="127.0.0.1";//192.168.1.11toto je na niektory realny robot.. na lokal budete davat "127.0.0.1"
-
+    //ipaddress="192.168.1.15";
     ui->setupUi(this);
+
+    int sizePx = mapSizeMeters * pixelsPerMeter;
+    mapPixmap = QPixmap(sizePx, sizePx);
+    mapPixmap.fill(Qt::black);
+
+
     datacounter=0;
 #ifndef DISABLE_OPENCV
     actIndex=-1;
@@ -52,6 +58,12 @@ void MainWindow::paintEvent(QPaintEvent *event)
     rect= ui->widget->geometry();//ziskate porametre stvorca,do ktoreho chcete kreslit
     rect.translate(0,15);
     painter.drawRect(rect);
+
+    QRect rect2;
+    rect2 = ui->widget_2->geometry();
+    rect2.translate(0,15);
+
+    painter.drawPixmap(rect2, mapPixmap);
 #ifndef DISABLE_OPENCV
     if(useCamera1==true && actIndex>-1)/// ak zobrazujem data z kamery a aspon niektory frame vo vectore je naplneny
     {
@@ -110,7 +122,6 @@ void  MainWindow::setUiValues(double robotX,double robotY,double robotFi)
     ui->lineEdit_4->setText(QString::number(robotFi));
 }
 
-
 void MainWindow::on_pushButton_9_clicked() //start button
 {
     //ziskanie joystickov
@@ -118,10 +129,12 @@ void MainWindow::on_pushButton_9_clicked() //start button
 
     //tu sa nastartuju vlakna ktore citaju data z lidaru a robota
 
+    connect(&_robot,SIGNAL(publishMapPoint(double,double)),this,SLOT(PaintMap(double,double)));
 
 
     connect(&_robot,SIGNAL(publishPosition(double,double,double)),this,SLOT(setUiValues(double,double,double)));
     connect(&_robot,SIGNAL(publishLidar(const std::vector<LaserData> &)),this,SLOT(paintThisLidar(const std::vector<LaserData> &)));
+    connect(ui->comboBox, SIGNAL(currentIndexChanged(int)),this, SLOT(indexChanged(int)));
 #ifndef DISABLE_OPENCV
     connect(&_robot,SIGNAL(publishCamera(const cv::Mat &)),this,SLOT(paintThisCamera(const cv::Mat &)));
 #endif
@@ -175,9 +188,12 @@ void MainWindow::on_pushButton_5_clicked()//right
 void MainWindow::on_pushButton_4_clicked() //stop
 {
     _robot.setSpeed(0,0);
-
 }
 
+void MainWindow::indexChanged(int index)
+{
+    _robot.setState(index);
+}
 
 
 
@@ -211,6 +227,26 @@ int MainWindow::paintThisLidar(const std::vector<LaserData> &laserData)
 
     update();
     return 0;
+}
+
+
+void MainWindow::PaintMap(double pointX, double pointY)
+{
+    QPainter painter(&mapPixmap);
+    painter.setPen(Qt::white);
+
+    int sizePx = mapSizeMeters * pixelsPerMeter;
+
+    int px = pointX * pixelsPerMeter;
+    int py = pointY * pixelsPerMeter;
+
+    px += sizePx / 2;
+    py = sizePx / 2 - py;
+
+    if(px >= 0 && px < sizePx && py >= 0 && py < sizePx)
+    {
+        painter.drawPoint(px, py);
+    }
 }
 
 #ifndef DISABLE_OPENCV

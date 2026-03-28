@@ -29,6 +29,10 @@ class MainWindow : public QMainWindow {
   Q_OBJECT
 
 public:
+
+  QPixmap mapPixmap;
+  int mapSizeMeters = 14;
+  int pixelsPerMeter = 50; // default scale
 #ifndef DISABLE_OPENCV
   bool useCamera1;
   int actIndex;
@@ -57,6 +61,8 @@ private slots:
 
   void on_pushButton_clicked();
 
+  void indexChanged(int index);
+
   int paintThisLidar(const std::vector<LaserData> &laserData);
 #ifndef DISABLE_OPENCV
   int paintThisCamera(const cv::Mat &cameraData);
@@ -81,6 +87,7 @@ private:
 #endif
 public slots:
   void setUiValues(double robotX, double robotY, double robotFi);
+    void  PaintMap(double pointX,double pointY);
 };
 
 #endif // MAINWINDOW_H
