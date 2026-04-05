@@ -28,6 +28,12 @@ struct Position{
     double y;
 };
 
+struct FreeInterval
+{
+    int start;
+    int end;
+};
+
 
 class robot : public QObject {
   Q_OBJECT
@@ -56,11 +62,19 @@ private:
   /// toto su vase premenne na vasu odometriu
 
     bool initParam;
+    double gyroOffSet;
     double dt;
   double x;
   double y;
   double fi;
   int timeToRise;
+  std::vector<int> binHistogram;
+
+  double selectedDirection;
+  bool obstacleAvoidanceActive;
+  bool frontBlocked;
+  double goalDirection;
+  double previousSelectedDirection;
 
   unsigned short lastValueLeft;
   unsigned short lastValueRight;
@@ -79,6 +93,16 @@ private:
   double calculateAngleError(Position setPoint, double x, double y, double fi);
   double getDistanceFromWhells(double leftWheel, double rightWheel);
   double realDistanceTraveled(unsigned short encoderValue, unsigned short *LastValue);
+  double normalizeAngleDeg(double angle);
+  double getGoalDirectionRelative(Position target, double x, double y, double fi);
+  std::vector<FreeInterval> getFreeIntervals(std::vector<int> binHistogram,int sectors);
+  int getIntervalWidth(FreeInterval interval, int sectors);
+  std::vector<double> getCandidates(std::vector<int> binHistogram,int sectors);
+  double angleDiffDeg(double a, double b);
+  double selectBestCandidate(const std::vector<double>& candidates,
+                                    double goalDirection,
+                                    double currentDirection,
+                                    double previousDirection);
 #ifndef DISABLE_OPENCV
   int processThisCamera(cv::Mat cameraData);
 #endif

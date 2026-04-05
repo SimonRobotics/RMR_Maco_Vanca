@@ -21,21 +21,38 @@ void robot::initAndStartRobot(std::string ipaddress)
     x = 0;
     y = 0;
     fi = 0;
+    binHistogram.assign(36,0);
 
-    Position p1;
-    p1.x = 4.0;
-    p1.y = 0;
-    position_list.push_back(p1);
+    selectedDirection = 0.0;
+    obstacleAvoidanceActive = false;
+    frontBlocked = false;
+    goalDirection = 0.0;
+    previousSelectedDirection = 0.0;
+
+    // Position p1;
+    // p1.x = 0;
+    // p1.y = 2;
+    // position_list.push_back(p1);
 
     Position p2;
-    p2.x = 4.0;
-    p2.y = -2.5;
+    p2.x = 2;
+    p2.y = -1;
     position_list.push_back(p2);
 
-    Position p3;
-    p3.x = 0;
-    p3.y = -2.5;
-    position_list.push_back(p3);
+    // Position p3;
+    // p3.x = 2.8;
+    // p3.y = 3;
+    // position_list.push_back(p3);
+
+    // Position p4;
+    // p3.x = 5.0;
+    // p3.y = 0.55;
+    // position_list.push_back(p3);
+
+    // Position p5;
+    // p3.x = 5.0;
+    // p3.y = 2.0;
+    // position_list.push_back(p3);
 
     ///setovanie veci na komunikaciu s robotom/lidarom/kamerou.. su tam adresa porty a callback.. laser ma ze sa da dat callback aj ako lambda.
     /// lambdy su super, setria miesto a ak su rozumnej dlzky,tak aj prehladnost... ak ste o nich nic nepoculi poradte sa s vasim doktorom alebo lekarnikom...
@@ -78,24 +95,31 @@ void robot::setSpeed(double forw, double rots)
 /// vola sa vzdy ked dojdu nove data z robota. nemusite nic riesit, proste sa to stane
 int robot::processThisRobot(const TKobukiData &robotdata)
 {
-
     if (!robot::initParam){
         lastValueLeft = robotdata.EncoderLeft;
         lastValueRight = robotdata.EncoderRight;
+        gyroOffSet = robotdata.GyroAngle / 100.0;
         robot::initParam = true;
     }
     ///tu mozete robit s datami z robota///
     double lenghtTraveled = robot::getDistanceFromWhells(realDistanceTraveled(robotdata.EncoderLeft, &lastValueLeft),realDistanceTraveled(robotdata.EncoderRight, &lastValueRight)); // m
 
-    fi = robotdata.GyroAngle/100; // rad
+    fi = robotdata.GyroAngle/100 - gyroOffSet; // rad
 
     double angle = qDegreesToRadians(fi); //stupne
 
     x += lenghtTraveled * std::cos(angle); //m
     y += lenghtTraveled * std::sin(angle); //m
 
+    //táto logika je fajn na to aby sa zmenilo smerovanie robota stačí upraviť target
+    //čiže na ang_e sa primárne nenahodí predok position listu ale vhodný kanditátsky smer
+    // a robot proste ide vpred kým nie je v cieli resp. nenarazí
+    //ale treba pridať zastavenie v prípade, že je fakt blízko pri prekážke musí zastaviť,
+    //uhlová rýchlosť sa tam meniť môže ako chce v tamkom prípade, čiže tú musím nejako získať
+    //aj min vzdialenosť z celého rozsahu lidaru
+
     if (!position_list.empty()){
-        auto target = position_list.front();
+        auto target = position_list.front(); // prehodiť na kandidátsky smer
 
         double dis_e = robot::calculateDistanceError(target, x, y);
 
@@ -111,7 +135,9 @@ int robot::processThisRobot(const TKobukiData &robotdata)
             }
         }
 
-        double ang_e = robot::calculateAngleError(target, x, y, fi);
+        //double ang_e = robot::calculateAngleError(target, x, y, fi);
+
+        double ang_e = normalizeAngleDeg(selectedDirection);
 
         if (std::abs(ang_e) < 5){
             rotationspeed = 0;
@@ -124,10 +150,13 @@ int robot::processThisRobot(const TKobukiData &robotdata)
             rotationspeed = 0.01*ang_e;
         }
     }
-    else{
+    else
+    {
         forwardspeed = 0;
         rotationspeed = 0;
     }
+
+
 
 ///TU PISTE KOD... TOTO JE TO MIESTO KED NEVIETE KDE ZACAT,TAK JE TO NAOZAJ TU. AK AJ TAK NEVIETE, SPYTAJTE SA CVICIACEHO MA TU NATO STRING KTORY DA DO HLADANIA XXX
 
@@ -184,8 +213,155 @@ double robot::calculateAngleError(Position setPoint, double x, double y, double 
 /// vola sa ked dojdu nove data z lidaru
 int robot::processThisLidar(const std::vector<LaserData>& laserData)
 {
-
     copyOfLaserData=laserData;
+
+    int sectors = binHistogram.size();
+    double sectorWidth = 360.0 / sectors;
+    std::vector<double> histogram(sectors,0.0);
+
+    double mi;
+    double ci = 1;
+    double a = 10;
+    double b = 0.01;
+
+    int CurSector = 0;
+
+    double safeRadius = 150.0 + 120.0;
+
+    for (auto &p : laserData)
+    {
+
+        double angle = 360.0 - p.scanAngle; // 1 - 360
+        if(angle == 360.0) angle = 0; // 0 - 359
+        double dist  = p.scanDistance; // mm
+
+        if (dist <= 0.0) continue;
+
+        //std::cout << "Uhol: " << angle << " Vzdialenost: " << dist << std::endl;
+
+        mi = std::pow(ci,2)*(a-b*dist);
+        if (mi < 0) mi = 0;
+
+        double gamma;
+
+        if (dist <= safeRadius)
+        {
+            gamma = 90.0;
+        }
+        else
+        {
+            gamma = qRadiansToDegrees(std::asin(safeRadius / dist));
+        }
+
+        double strAngle = angle - gamma;
+        double endAngle = angle + gamma;
+
+        while (strAngle < 0.0) strAngle += 360.0;
+        while (strAngle >= 360.0) strAngle -= 360.0;
+        while (endAngle < 0.0) endAngle += 360.0;
+        while (endAngle >= 360.0) endAngle -= 360.0;
+
+        int strSector = int(strAngle/sectorWidth);
+        int endSector = int(endAngle/sectorWidth);
+
+        if (strSector <= endSector)
+        {
+            for (int s = strSector; s <= endSector; s++)
+            {
+                histogram[s] += mi;
+            }
+        }
+        else
+        {
+            for (int s = strSector; s < sectors; s++)
+            {
+                histogram[s] += mi;
+            }
+            for (int s = 0; s <= endSector; s++)
+            {
+                histogram[s] += mi;
+            }
+        }
+
+        // CurSector = int(angle/sectorWidth);
+        // if(CurSector == 36) CurSector = 0;
+        // histogram[CurSector] += mi;
+
+    }
+    // for (int i = 0; i < sectors; i++)
+    // {
+    //     std::cout << "Sektor " << i
+    //               << " [" << i*sectorWidth << ", " << (i+1)*sectorWidth << ") : "
+    //               << histogram[i] << std::endl;
+
+    // }
+
+    int upperLimit = 60;
+    int lowerLimit = 40;
+    for (int i = 0; i < sectors; i++)
+    {
+        if(histogram[i] >= upperLimit) binHistogram[i] = 1;
+        else if(histogram[i] <= lowerLimit) binHistogram[i] = 0;
+    }
+
+    std::vector<double> candidates = getCandidates(binHistogram,sectors);
+
+    if (!position_list.empty())
+    {
+        Position target = position_list.front();
+
+        double goalCandidate = getGoalDirectionRelative(target, x, y, fi); // <- v rozsahu <-180,180>
+
+        if (goalCandidate < 0.0)
+            goalCandidate += 360.0; // <- teraz 0..360
+
+        int goalSector = int(goalCandidate / sectorWidth);
+        if (goalSector >= sectors) goalSector = sectors - 1;
+
+        if (binHistogram[goalSector] == 0)
+        {
+            bool alreadyThere = false;
+
+            for (double c : candidates)
+            {
+                if (std::abs(c - goalCandidate) < 0.001)
+                {
+                    alreadyThere = true;
+                    break;
+                }
+            }
+
+            if (!alreadyThere)
+                candidates.push_back(goalCandidate);
+        }
+    }
+
+    // for(int i = 0;i<candidates.size();i++){
+    //     std::cout << "Kandidat " << i + 1 << " je " << candidates[i] << " stupnov." << std::endl;
+    // }
+
+    if (!position_list.empty() && !candidates.empty())
+    {
+        Position target = position_list.front();
+
+        double goalDirection = getGoalDirectionRelative(target, x, y, fi);
+        if (goalDirection < 0.0) goalDirection += 360.0;
+
+        double currentDirection = 0.0; // rovno pred robot
+        double previousDirection = previousSelectedDirection;
+        if (previousDirection < 0.0) previousDirection += 360.0;
+
+        selectedDirection = selectBestCandidate(candidates,
+                                                goalDirection,
+                                                currentDirection,
+                                                previousDirection);
+
+        previousSelectedDirection = selectedDirection;
+    }
+
+    //std::cout << "selectedDirection = " << selectedDirection << std::endl;
+
+
 
     //tu mozete robit s datami z lidaru.. napriklad najst prekazky, zapisat do mapy. naplanovat ako sa prekazke vyhnut.
     // ale nic vypoctovo narocne - to iste vlakno ktore cita data z lidaru
@@ -228,6 +404,128 @@ double robot::realDistanceTraveled(unsigned short encoderValue, unsigned short *
 
     return (double)diff*TICK_TO_METER;
 }
+
+double robot::normalizeAngleDeg(double angle)
+{
+    while (angle > 180.0) angle -= 360.0;
+    while (angle < -180.0) angle += 360.0;
+    return angle;
+}
+
+double robot::getGoalDirectionRelative(Position target, double x, double y, double fi)
+{
+    double desiredGlobal = std::atan2(target.y - y, target.x - x) * 180.0 / M_PI;
+    return normalizeAngleDeg(desiredGlobal - fi);
+}
+
+std::vector<FreeInterval> robot::getFreeIntervals(std::vector<int> binHistogram,int sectors)
+{
+    bool inInterval = false;
+    std::vector<FreeInterval> intervals;
+    FreeInterval p;
+    for(int h = 0; h < binHistogram.size();h++)
+    {
+        if(binHistogram[h] == 0 && inInterval == false)
+        {
+            p.start = h;
+            inInterval = true;
+        }
+        else if(binHistogram[h] == 1 && inInterval == true){
+            p.end = h - 1;
+            inInterval = false;
+            intervals.push_back(p);
+        }
+    }
+    if(inInterval){
+        p.end = sectors - 1;
+        intervals.push_back(p);
+    }
+    if(intervals.size() > 1 && intervals.front().start == 0 && intervals.back().end == sectors - 1){
+        p.start = intervals.back().start;
+        p.end = intervals.front().end;
+        intervals.erase(intervals.begin());
+        intervals.pop_back();
+        intervals.push_back(p);
+    }
+    return intervals;
+}
+
+int robot::getIntervalWidth(FreeInterval interval, int sectors)
+{
+    if (interval.end >= interval.start)
+        return interval.end - interval.start + 1;
+    else
+        return (sectors - interval.start) + (interval.end + 1);
+}
+
+std::vector<double> robot::getCandidates(std::vector<int> binHistogram,int sectors)
+{
+    std::vector<double> candidates;
+    double candidate;
+    double sectorWidth = 360.0 / sectors;
+    std::vector<FreeInterval> intervals = getFreeIntervals(binHistogram,sectors);
+    int width;
+    for(auto i:intervals){
+        width = getIntervalWidth(i,sectors);
+        if(width < 5){
+            candidate = sectorWidth * width / 2 + sectorWidth * i.start;
+            if(candidate >= 360) candidate -= 360;
+            candidates.push_back(candidate);
+        }else{
+            candidate = i.start * sectorWidth + sectorWidth;
+            while(candidate >= 360.0) candidate -= 360.0;
+            while(candidate < 0.0) candidate += 360.0;
+            candidates.push_back(candidate);
+            candidate = i.end * sectorWidth - sectorWidth;
+            while(candidate >= 360.0) candidate -= 360.0;
+            while(candidate < 0.0) candidate += 360.0;
+            candidates.push_back(candidate);
+        }
+    }
+    return candidates;
+}
+
+
+
+double robot::angleDiffDeg(double a, double b)
+{
+    double diff = std::abs(a - b);
+    if (diff > 180.0) diff = 360.0 - diff;
+    return diff;
+}
+
+double robot::selectBestCandidate(const std::vector<double>& candidates,
+                                  double goalDirection,
+                                  double currentDirection,
+                                  double previousDirection)
+{
+    if (candidates.empty())
+        return currentDirection;
+
+    double wg = 5.0;   // ciel
+    double wc = 6.0;   // aktualny smer
+    double wp = 2.0;   // predchadzajuci vyber
+
+    double bestCandidate = candidates[0];
+    double bestCost = 1e9;
+
+    for (double c : candidates)
+    {
+        double cost =
+            wg * angleDiffDeg(c, goalDirection) +
+            wc * angleDiffDeg(c, currentDirection) +
+            wp * angleDiffDeg(c, previousDirection);
+
+        if (cost < bestCost)
+        {
+            bestCost = cost;
+            bestCandidate = c;
+        }
+    }
+
+    return bestCandidate;
+}
+
 
   #ifndef DISABLE_OPENCV
 ///toto je calback na data z kamery, ktory ste podhodili robotu vo funkcii initAndStartRobot
