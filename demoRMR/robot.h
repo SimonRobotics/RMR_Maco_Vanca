@@ -3,7 +3,9 @@
 #include "librobot/librobot.h"
 #include <QObject>
 #include <QWidget>
-#include <queue>
+#include <QQueue>
+#include <QDebug>
+
 
 #ifndef DISABLE_OPENCV
 #include "opencv2/core/utility.hpp"
@@ -23,7 +25,9 @@ Q_DECLARE_METATYPE(std::vector<LaserData>)
 
 #define TICK_TO_METER 0.000085292090497737556558
 #define MAX_SPEED 200 //mm / s
-#define MAX_SPEED_ANG 90 //stupen / s
+#define MAX_SPEED_ANG 0.4 //stupen / s
+#define MAP_SIZE_METERS 14//m
+#define PIXEL_PER_METER 20// px / m
 
 struct Position{
     double x;
@@ -34,6 +38,11 @@ struct TimePosition{
     double timeStamp;
     double angle;
     Position pos;
+};
+
+struct Point{
+    int x;
+    int y;
 };
 
 
@@ -51,11 +60,16 @@ public:
   // tato funkcia fyzicky posiela hodnoty do robota
   void setSpeed(double forw, double rots);
   void setState(int state);
+  int getState();
+  void addWaypoint(double x, double y);
+  std::vector<Point> getMap();
 
 signals:
   void publishPosition(double x, double y, double z);
-  void publishMapPoint(double x, double y);
+  void publishMap(std::vector<Point> pointList);
+  void publishWaypoints(QQueue<Position> waypointList);
   void publishLidar(const std::vector<LaserData> &lidata);
+  void resetMap();
 
 #ifndef DISABLE_OPENCV
   void publishCamera(const cv::Mat &camframe);
@@ -66,11 +80,12 @@ signals:
 private:
   /// toto su vase premenne na vasu odometriu
 
-    bool initParam;
-    double dt;
+  bool initParam;
+  bool newLidarData;
+  double d;
   double gyroOffSet;
-  int map[14*50][14*50];
   int state;
+  int map[MAP_SIZE_METERS*PIXEL_PER_METER][MAP_SIZE_METERS*PIXEL_PER_METER];
 
   unsigned short lastValueLeft;
   unsigned short lastValueRight;
@@ -85,19 +100,26 @@ private:
   /// toto su callbacky co sa sa volaju s novymi datami
   int processThisLidar(const std::vector<LaserData> &laserData);
   int processThisRobot(const TKobukiData &robotdata);
-  double ramp(double target, double dt, double speed);
+  double ramp(double target, double d, double y);
   double calculateDistanceError(Position setPoint, double x, double y);
   double calculateAngleError(Position setPoint, double x, double y, double fi);
   double getDistanceFromWhells(double leftWheel, double rightWheel);
   double realDistanceTraveled(unsigned short encoderValue, unsigned short *LastValue);
+  double distance_polar(double r1, double theta1, double r2, double theta2);
   double interpolate(double x1, double x2, double t1, double t2, double t);
   double interpolateAngle(double a1, double a2, double t1, double t2, double t);
+  void printToMap(Position pos);
+  void createCostMap();
+  std::vector<Position> createPath();
+  std::vector<Point> findElementAroundPoint(Point p, int element);
+  int sign(double x);
+  Point xyToMapTransform(Position pos);
 #ifndef DISABLE_OPENCV
   int processThisCamera(cv::Mat cameraData);
 #endif
 
   /// pomocne strukutry aby ste si trosku nerobili race conditions
-  queue<Position> position_list;
+  QQueue<Position> position_list;
 
   std::vector<TimePosition> pastPositions;
 

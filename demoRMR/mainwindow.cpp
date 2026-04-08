@@ -21,10 +21,12 @@ MainWindow::MainWindow(QWidget *parent) :
     //ipaddress="192.168.1.15";
     ui->setupUi(this);
 
+    mapSizeMeters = 14;
+    pixelsPerMeter = 20;
+
     int sizePx = mapSizeMeters * pixelsPerMeter;
     mapPixmap = QPixmap(sizePx, sizePx);
     mapPixmap.fill(Qt::black);
-
 
     datacounter=0;
 #ifndef DISABLE_OPENCV
@@ -59,7 +61,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
     rect.translate(0,15);
     painter.drawRect(rect);
 
-    QRect rect2;
     rect2 = ui->widget_2->geometry();
     rect2.translate(0,15);
 
@@ -129,8 +130,10 @@ void MainWindow::on_pushButton_9_clicked() //start button
 
     //tu sa nastartuju vlakna ktore citaju data z lidaru a robota
 
-    connect(&_robot,SIGNAL(publishMapPoint(double,double)),this,SLOT(PaintMap(double,double)));
+    connect(&_robot,SIGNAL(publishMap(std::vector<Point>)),this,SLOT(paintMap(std::vector<Point>)));
 
+    connect(&_robot,SIGNAL(publishWaypoints(QQueue<Position>)),this,SLOT(paintWaypoints(QQueue<Position>)));
+    connect(&_robot,SIGNAL(resetMap()),this,SLOT(repaintMap()));
 
     connect(&_robot,SIGNAL(publishPosition(double,double,double)),this,SLOT(setUiValues(double,double,double)));
     connect(&_robot,SIGNAL(publishLidar(const std::vector<LaserData> &)),this,SLOT(paintThisLidar(const std::vector<LaserData> &)));
@@ -195,7 +198,22 @@ void MainWindow::indexChanged(int index)
     _robot.setState(index);
 }
 
+void MainWindow::mousePressEvent(QMouseEvent *event)
+{
+    if (!rect2.contains(event->pos()))
+        return;
 
+    const int mapPixelSize = mapSizeMeters * pixelsPerMeter;
+
+    const QPoint local = event->pos() - rect2.topLeft();
+
+    double mapX = (mapPixelSize / 2.0 - local.x() * mapPixelSize / rect2.width()) / pixelsPerMeter;
+    double mapY = (mapPixelSize / 2.0 - local.y() * mapPixelSize / rect2.height()) / pixelsPerMeter;
+
+    mapX = -mapX;
+
+    _robot.addWaypoint(mapX, mapY);
+}
 
 void MainWindow::on_pushButton_clicked()
 {
@@ -229,24 +247,44 @@ int MainWindow::paintThisLidar(const std::vector<LaserData> &laserData)
     return 0;
 }
 
+void MainWindow::paintWaypoints(QQueue<Position> waypointList)
+{
+    QPainter painter(&mapPixmap);
+    painter.setPen(Qt::yellow);
 
-void MainWindow::PaintMap(double pointX, double pointY)
+    int sizePx = mapSizeMeters * pixelsPerMeter;
+
+    while(!waypointList.empty()){
+
+        int px = waypointList.front().x * pixelsPerMeter;
+        int py = waypointList.front().y * pixelsPerMeter;
+
+        px += sizePx / 2;
+        py = sizePx / 2 - py;
+
+        if(px >= 0 && px < sizePx && py >= 0 && py < sizePx)
+        {
+            painter.drawEllipse(px, py, 1, 1);
+        }
+        waypointList.pop_front();
+    }
+}
+
+void MainWindow::repaintMap()
+{
+    mapPixmap.fill(Qt::black);
+    paintMap(_robot.getMap());
+}
+
+void MainWindow::paintMap(std::vector<Point> mapList)
 {
     QPainter painter(&mapPixmap);
     painter.setPen(Qt::white);
 
-    int sizePx = mapSizeMeters * pixelsPerMeter;
-
-    int px = pointX * pixelsPerMeter;
-    int py = pointY * pixelsPerMeter;
-
-    px += sizePx / 2;
-    py = sizePx / 2 - py;
-
-    if(px >= 0 && px < sizePx && py >= 0 && py < sizePx)
-    {
-        painter.drawPoint(px, py);
+    for(int i = 0; i < mapList.size();i++){
+        painter.drawPoint(mapList.at(i).x, mapList.at(i).y);
     }
+
 }
 
 #ifndef DISABLE_OPENCV

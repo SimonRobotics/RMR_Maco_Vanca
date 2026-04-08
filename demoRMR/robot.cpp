@@ -15,31 +15,18 @@ void robot::initAndStartRobot(std::string ipaddress)
 {
     useDirectCommands = 0;
     initParam = false;
-    dt = 20; // s
+    newLidarData = false;
+    d = 10; // s
     forwardspeed=0;
     rotationspeed=0;
     state = 0;
 
-    // for (int i = 0; i< 140;i++){
-    //     for (int j = 0; j< 140;j++){
-    //         map[i][j] = false;
-    //     }
-    // }
 
-    Position p1;
-    p1.x = 0;
-    p1.y = 3.1;
-    position_list.push(p1);
-
-    Position p2;
-    p2.x = 3.0;
-    p2.y = 3.1;
-    position_list.push(p2);
-
-    Position p3;
-    p3.x = 3.0;
-    p3.y = 0;
-    position_list.push(p3);
+    for (int i = 0; i< MAP_SIZE_METERS*PIXEL_PER_METER;i++){
+        for (int j = 0; j< MAP_SIZE_METERS*PIXEL_PER_METER;j++){
+            map[i][j] = 0;
+        }
+    }
 
     ///setovanie veci na komunikaciu s robotom/lidarom/kamerou.. su tam adresa porty a callback.. laser ma ze sa da dat callback aj ako lambda.
     /// lambdy su super, setria miesto a ak su rozumnej dlzky,tak aj prehladnost... ak ste o nich nic nepoculi poradte sa s vasim doktorom alebo lekarnikom...
@@ -65,6 +52,31 @@ void robot::setSpeedVal(double forw, double rots)
     useDirectCommands=0;
 }
 
+void robot::addWaypoint(double x, double y)
+{
+    Position pos;
+    pos.x = x;
+    pos.y = y;
+    position_list.push_back(pos);
+}
+
+std::vector<Point> robot::getMap()
+{
+    std::vector<Point> mm;
+    for (int i = 0; i< MAP_SIZE_METERS*PIXEL_PER_METER;i++){
+        for (int j = 0; j< MAP_SIZE_METERS*PIXEL_PER_METER;j++){
+            if (map[i][j] == 1){
+                Point p;
+                p.x = i;
+                p.y = j;
+                mm.push_back(p);
+            }
+        }
+    }
+    return mm;
+}
+
+
 void robot::setSpeed(double forw, double rots)
 {
     if(forw==0 && rots!=0)
@@ -81,6 +93,10 @@ void robot::setSpeed(double forw, double rots)
 void robot::setState(int state)
 {
     robot::state = state;
+}
+int robot::getState()
+{
+    return robot::state;
 }
 
 ///toto je calback na data z robota, ktory ste podhodili robotu vo funkcii initAndStartRobot
@@ -128,45 +144,61 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
     pastPositions.push_back(TimePosition);
 
-    if (!position_list.empty()){
-        auto target = position_list.front();
+    if (state == 1){
+        if (!position_list.empty()){
+            auto target = position_list.front();
 
-        double dis_e = robot::calculateDistanceError(target, pastPositions.back().pos.x, pastPositions.back().pos.y);
+            double dis_e = robot::calculateDistanceError(target, pastPositions.back().pos.x, pastPositions.back().pos.y);
 
-        if (0.01 > dis_e){
-            forwardspeed = 0;
-            rotationspeed = 0;
-            position_list.pop();
-        } else {
-            if (dis_e*2*MAX_SPEED > MAX_SPEED){
-                forwardspeed = robot::ramp(MAX_SPEED,dt,forwardspeed);
-            }else{
-                forwardspeed = robot::ramp(dis_e*2*MAX_SPEED,dt,forwardspeed);
+            if (0.01 > dis_e){
+                forwardspeed = 0;
+                rotationspeed = 0;
+                position_list.pop_front();
+                emit resetMap();
+                emit publishWaypoints(position_list);
+            } else {
+                if (dis_e*2*MAX_SPEED > MAX_SPEED){
+                    forwardspeed = robot::ramp(MAX_SPEED,d,forwardspeed);
+                }else{
+                    forwardspeed = robot::ramp(dis_e*2*MAX_SPEED,d,forwardspeed);
+                }
             }
-        }
 
-        double ang_e = robot::calculateAngleError(target, pastPositions.back().pos.x, pastPositions.back().pos.y, pastPositions.back().angle);
+            double ang_e = robot::calculateAngleError(target, pastPositions.back().pos.x, pastPositions.back().pos.y, pastPositions.back().angle);
 
-        if (std::abs(ang_e) < 5){
-            rotationspeed = 0;
-        }
-        else if (std::abs(ang_e) > 45){
-            forwardspeed = 0;
-            rotationspeed = 0.01*ang_e;
+            if (std::abs(ang_e) < 5){
+                rotationspeed = 0;
+            }
+            else if (std::abs(ang_e) > 45){
+                forwardspeed = 0;
+                if(ang_e*0.05*MAX_SPEED_ANG > MAX_SPEED_ANG){
+                    rotationspeed =robot::ramp(sign(ang_e)*MAX_SPEED_ANG, 0.01,rotationspeed);
+                }
+                else{
+                    rotationspeed = robot::ramp(MAX_SPEED_ANG*0.05*ang_e, 0.01,rotationspeed);
+                }
+            }
+            else{
+                if(ang_e*0.05*MAX_SPEED_ANG > MAX_SPEED_ANG){
+                    rotationspeed = robot::ramp(sign(ang_e)*MAX_SPEED_ANG, 0.01,rotationspeed);
+                }
+                else{
+                    rotationspeed = robot::ramp(MAX_SPEED_ANG*0.05*ang_e, 0.01,rotationspeed);
+                }
+            }
+            qDebug() << rotationspeed;
         }
         else{
-            rotationspeed = 0.01*ang_e;
+            forwardspeed = 0;
+            rotationspeed = 0;
         }
     }
-    else{
-        forwardspeed = 0;
-        rotationspeed = 0;
-    }
+    if (state == 1 && newLidarData){
+        std::vector<Point> mapList;
 
-    if (state == 1){
+        mapList.reserve(copyOfLaserData.size());
         for(int i = 0; i < copyOfLaserData.size();i++){
-            if (copyOfLaserData.at(i).scanDistance > 0){
-
+            if((copyOfLaserData.at(i).scanDistance > 0 && copyOfLaserData.at(i).scanDistance <= 600) || (copyOfLaserData.at(i).scanDistance >= 700 && copyOfLaserData.at(i).scanDistance <= 3000)){
                 bool exist = false;
                 double lastAngle;
                 double angle;
@@ -203,15 +235,24 @@ int robot::processThisRobot(const TKobukiData &robotdata)
                     double ix = interpolate(lastX, x, lastt, t, it);
                     double iy = interpolate(lastY, y, lastt, t, it);
 
-                    lidx = lidx + ix;
-                    lidy = lidy + iy;
+                    Position pos;
 
-                    emit publishMapPoint(lidx,lidy);
+                    pos.x = lidx + ix;
+                    pos.y = lidy + iy;
 
-                    //map[lix][liy] = 1;
+                    mapList.push_back(xyToMapTransform(pos));
+
+                    printToMap(pos);
                 }
             }
         }
+
+        emit publishMap(mapList);
+        emit publishWaypoints(position_list);
+        newLidarData = false;
+    }
+    if(state == 2){
+
     }
 
     pastPositions.erase(pastPositions.begin());
@@ -235,9 +276,6 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         /// vtedy ale odporucam pouzit mutex, aby sa vam nestalo ze budete pocas vypisovania prepisovat niekde inde
 
     }
-    // if(datacounter%50==0){
-    //     emit publishMapPoint(x,y);
-    // }
 
     ///---tu sa posielaju rychlosti do robota... vklude zakomentujte ak si chcete spravit svoje
     if(useDirectCommands==0)
@@ -255,6 +293,10 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
     return 0;
 
+}
+
+double robot::distance_polar(double r1, double theta1, double r2, double theta2) {
+    return std::sqrt(r1*r1 + r2*r2 - 2*r1*r2*cos(theta1 - theta2));
 }
 
 double robot::interpolate(double x1, double x2,
@@ -277,6 +319,71 @@ double robot::interpolateAngle(double a1, double a2, double t1, double t2, doubl
     return a1 + ratio * diff;
 }
 
+void robot::printToMap(Position pos)
+{
+    int sizePx = MAP_SIZE_METERS * PIXEL_PER_METER;
+
+    int px = pos.x * PIXEL_PER_METER;
+    int py = pos.y * PIXEL_PER_METER;
+
+    px += sizePx / 2;
+    py = sizePx / 2 - py;
+
+    if(px >= 0 && px < sizePx && py >= 0 && py < sizePx)
+    {
+        map[px][py] = 1;
+    }
+}
+
+std::vector<Point> robot::findElementAroundPoint(Point p, int element)
+{
+    std::vector<Point> result;
+
+    for (int dx = -1; dx <= 1; dx++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            int nx = p.x + dx;
+            int ny = p.y + dy;
+
+            if (nx >= 0 && nx < MAP_SIZE_METERS*PIXEL_PER_METER && ny >= 0 && ny < MAP_SIZE_METERS*PIXEL_PER_METER)
+            {
+                if (map[nx][ny] == element)
+                {
+                    result.push_back({nx, ny});
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+int robot::sign(double x)
+{
+    if(x > 0){
+        return 1;
+    }
+    else if(x < 0){
+        return -1;
+    }
+    else{
+        return 0;
+    }
+}
+
+Point robot::xyToMapTransform(Position pos)
+{
+    Point p;
+    p.x = pos.x * PIXEL_PER_METER;
+    p.y = pos.y * PIXEL_PER_METER;
+
+    p.x += MAP_SIZE_METERS * PIXEL_PER_METER / 2;
+    p.y = MAP_SIZE_METERS * PIXEL_PER_METER / 2 - p.y;
+
+    return p;
+}
+
 double robot::calculateDistanceError(Position setPoint, double x, double y){
     return std::sqrt(std::pow(setPoint.x - x,2)+std::pow(setPoint.y-y,2));
 }
@@ -294,28 +401,31 @@ double robot::calculateAngleError(Position setPoint, double x, double y, double 
 /// vola sa ked dojdu nove data z lidaru
 int robot::processThisLidar(const std::vector<LaserData>& laserData)
 {
-
     copyOfLaserData=laserData;
 
+    newLidarData = true;
     //tu mozete robit s datami z lidaru.. napriklad najst prekazky, zapisat do mapy. naplanovat ako sa prekazke vyhnut.
     // ale nic vypoctovo narocne - to iste vlakno ktore cita data z lidaru
    // updateLaserPicture=1;
     emit publishLidar(copyOfLaserData);
-   // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
+   //update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
 
     return 0;
 }
 
-double robot::ramp(double target, double dt, double speed){
+double robot::ramp(double target, double d, double y){
 
-    if(target-0.1 > speed){
-        speed += dt;
+    if(target-0.1 > y){
+        y += d;
+    }
+    else if(target+0.1 < y){
+        y -= d;
     }
     else{
-        speed = target;
+        y = target;
     }
 
-    return speed;
+    return y;
 }
 
 double robot::getDistanceFromWhells(double leftWheel, double rightWheel)
