@@ -16,6 +16,7 @@ void robot::initAndStartRobot(std::string ipaddress)
     useDirectCommands = 0;
     initParam = false;
     newLidarData = false;
+    createCostmap = true;
     d = 10; // s
     forwardspeed=0;
     rotationspeed=0;
@@ -76,6 +77,21 @@ std::vector<Point> robot::getMap()
     return mm;
 }
 
+std::vector<Point> robot::getCostMap()
+{
+    std::vector<Point> mm;
+    for (int i = 0; i< MAP_SIZE_METERS*PIXEL_PER_METER;i++){
+        for (int j = 0; j< MAP_SIZE_METERS*PIXEL_PER_METER;j++){
+            if (map[i][j] > 1){
+                Point p;
+                p.x = i;
+                p.y = j;
+                mm.push_back(p);
+            }
+        }
+    }
+    return mm;
+}
 
 void robot::setSpeed(double forw, double rots)
 {
@@ -144,13 +160,13 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
     pastPositions.push_back(TimePosition);
 
-    if (state == 1){
+    if (state == 1 | state == 2){
         if (!position_list.empty()){
             auto target = position_list.front();
 
             double dis_e = robot::calculateDistanceError(target, pastPositions.back().pos.x, pastPositions.back().pos.y);
 
-            if (0.01 > dis_e){
+            if (0.1 > dis_e){
                 forwardspeed = 0;
                 rotationspeed = 0;
                 position_list.pop_front();
@@ -186,7 +202,6 @@ int robot::processThisRobot(const TKobukiData &robotdata)
                     rotationspeed = robot::ramp(MAX_SPEED_ANG*0.05*ang_e, 0.01,rotationspeed);
                 }
             }
-            qDebug() << rotationspeed;
         }
         else{
             forwardspeed = 0;
@@ -250,8 +265,35 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         emit publishMap(mapList);
         emit publishWaypoints(position_list);
         newLidarData = false;
+        createCostmap = true;
     }
     if(state == 2){
+        if(createCostmap && !position_list.empty()){
+            createCostMap(5);
+
+            Position myP;
+            myP = position_list.back();
+            createPath(xyToMapTransform(myP));
+
+
+            QQueue<Position> pp;
+
+            pp = getPathKeyPositions();
+
+
+            emit resetMap();
+            emit publishWaypoints(pp);
+
+            position_list.clear();
+
+            for(auto i: pp){
+                position_list.push_back(i);
+            }
+            position_list.push_back(myP);
+
+            createCostmap = false;
+
+        }
 
     }
 
@@ -335,6 +377,92 @@ void robot::printToMap(Position pos)
     }
 }
 
+void robot::createCostMap(int numOfPixels)
+{
+    for(int k = 1; k <= numOfPixels; k++){
+        for (int i = 0; i< MAP_SIZE_METERS*PIXEL_PER_METER;i++){
+            for (int j = 0; j< MAP_SIZE_METERS*PIXEL_PER_METER;j++){
+                Point p;
+                p.x = i;
+                p.y = j;
+                if(map[p.x][p.y] == k){
+                    std::vector<Point> fill = findElementAroundPoint(p,0);
+                    for(int l =0; l < fill.size(); l++){
+                        map[fill.at(l).x][fill.at(l).y]=k+1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+int robot::createPath(Point p)
+{
+    map[p.x][p.y] = -1;
+    std::vector<Point> f = findLowerThenElementAroundPoint(p,1);
+    std::vector<Point> sus;
+    sus.reserve(8);
+    QQueue<Point> storage;
+
+    int k = -2;
+    while(!f.empty()){
+        for (int i = 0; i < f.size();i++){
+            sus = findElementAroundPointCross(f.at(i),0);
+
+            for (int j = 0; j < sus.size(); j++){
+                map[sus.at(j).x][sus.at(j).y] = k;
+                storage.push_back(sus.at(j));
+            }
+        }
+        f.clear();
+        if(storage.empty()){
+            break;
+        }
+        for(auto i : storage){
+            f.push_back(i);
+        }
+        storage.clear();
+        k--;
+    }
+
+
+    Point robotPosition = xyToMapTransform(pastPositions.back().pos);
+
+    if(map[robotPosition.x][robotPosition.y] <= k){
+        return 1;
+    }else{
+        return 0;
+    }
+
+}
+
+QQueue<Position> robot::getPathKeyPositions()
+{
+    QQueue<Position> keyPoints;
+    std::vector<Point> sus;
+    sus.reserve(8);
+    Point start = xyToMapTransform(pastPositions.back().pos);
+    Point point = start;
+    Point last;
+    int lastDirection = 0;
+
+    while(1){
+        last = point;
+        sus = findElementAroundPoint(point, map[point.x][point.y]+1);
+        if(sus.empty()){
+            keyPoints.push_back(mapToXYTransform(last));
+            break;
+        }
+        point = sus.front();
+        int dir = findDirection(last,point);
+        if(dir != lastDirection){
+            lastDirection = dir;
+            keyPoints.push_back(mapToXYTransform(point));
+        }
+    }
+    return keyPoints;
+}
+
 std::vector<Point> robot::findElementAroundPoint(Point p, int element)
 {
     std::vector<Point> result;
@@ -357,6 +485,75 @@ std::vector<Point> robot::findElementAroundPoint(Point p, int element)
     }
 
     return result;
+}
+
+std::vector<Point> robot::findElementAroundPointCross(Point p, int element)
+{
+    std::vector<Point> result;
+
+    for (int dx = -1; dx <= 1; dx++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            if(dx == 0 | dy == 0){
+                int nx = p.x + dx;
+                int ny = p.y + dy;
+
+                if (nx >= 0 && nx < MAP_SIZE_METERS*PIXEL_PER_METER && ny >= 0 && ny < MAP_SIZE_METERS*PIXEL_PER_METER)
+                {
+                    if (map[nx][ny] == element)
+                    {
+                        result.push_back({nx, ny});
+                    }
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+std::vector<Point> robot::findLowerThenElementAroundPoint(Point p, int element)
+{
+    std::vector<Point> result;
+
+    for (int dx = -1; dx <= 1; dx++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            int nx = p.x + dx;
+            int ny = p.y + dy;
+
+            if (nx >= 0 && nx < MAP_SIZE_METERS*PIXEL_PER_METER && ny >= 0 && ny < MAP_SIZE_METERS*PIXEL_PER_METER)
+            {
+                if (map[nx][ny] < element)
+                {
+                    result.push_back({nx, ny});
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+int robot::findDirection(Point last, Point point)
+{
+    int dx = point.x - last.x;
+    int dy = point.y - last.y;
+
+    if (dx == 0 && dy == 0) return 0;
+
+    if (dx > 0 && dy > 0) return 1; // top-right
+    if (dx == 0 && dy > 0) return 2; // top
+    if (dx < 0 && dy > 0) return 3; // top-left
+    if (dx < 0 && dy == 0) return 4; // left
+    if (dx < 0 && dy < 0) return 5; // bottom-left
+    if (dx == 0 && dy < 0) return 6; // bottom
+    if (dx > 0 && dy < 0) return 7; // bottom-right
+    if (dx > 0 && dy == 0) return 8; // right
+
+    return -1;
 }
 
 int robot::sign(double x)
@@ -382,6 +579,19 @@ Point robot::xyToMapTransform(Position pos)
     p.y = MAP_SIZE_METERS * PIXEL_PER_METER / 2 - p.y;
 
     return p;
+}
+
+Position robot::mapToXYTransform(Point p)
+{
+    Position pos;
+
+    double centeredX = p.x - MAP_SIZE_METERS * PIXEL_PER_METER / 2;
+    double centeredY = MAP_SIZE_METERS * PIXEL_PER_METER / 2 - p.y;
+
+    pos.x = centeredX / PIXEL_PER_METER;
+    pos.y = centeredY / PIXEL_PER_METER;
+
+    return pos;
 }
 
 double robot::calculateDistanceError(Position setPoint, double x, double y){

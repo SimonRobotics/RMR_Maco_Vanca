@@ -28,6 +28,7 @@ Q_DECLARE_METATYPE(std::vector<LaserData>)
 #define MAX_SPEED_ANG 0.4 //stupen / s
 #define MAP_SIZE_METERS 14//m
 #define PIXEL_PER_METER 20// px / m
+#define ROBOT_SIZE_MM 350 /mm
 
 struct Position{
     double x;
@@ -63,6 +64,7 @@ public:
   int getState();
   void addWaypoint(double x, double y);
   std::vector<Point> getMap();
+  std::vector<Point> getCostMap();
 
 signals:
   void publishPosition(double x, double y, double z);
@@ -82,6 +84,7 @@ private:
 
   bool initParam;
   bool newLidarData;
+  bool createCostmap;
   double d;
   double gyroOffSet;
   int state;
@@ -109,11 +112,16 @@ private:
   double interpolate(double x1, double x2, double t1, double t2, double t);
   double interpolateAngle(double a1, double a2, double t1, double t2, double t);
   void printToMap(Position pos);
-  void createCostMap();
-  std::vector<Position> createPath();
+  void createCostMap(int numOfPixels);
+  int createPath(Point p);
+  QQueue<Position> getPathKeyPositions();
+  std::vector<Point> findElementAroundPointCross(Point p, int element);
   std::vector<Point> findElementAroundPoint(Point p, int element);
+  std::vector<Point> findLowerThenElementAroundPoint(Point p, int element);
+  int findDirection(Point last, Point point);
   int sign(double x);
   Point xyToMapTransform(Position pos);
+  Position mapToXYTransform(Point p);
 #ifndef DISABLE_OPENCV
   int processThisCamera(cv::Mat cameraData);
 #endif

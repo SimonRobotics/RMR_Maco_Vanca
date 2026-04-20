@@ -113,6 +113,16 @@ void MainWindow::paintEvent(QPaintEvent *event)
 #endif
 }
 
+void MainWindow::paintPoints(std::vector<Point> points, QColor color)
+{
+    QPainter painter(&mapPixmap);
+    painter.setPen(color);
+
+    for(int i = 0; i < points.size();i++){
+        painter.drawPoint(points.at(i).x, points.at(i).y);
+    }
+}
+
 
 /// toto je slot. niekde v kode existuje signal, ktory je prepojeny. pouziva sa napriklad (v tomto pripade) ak chcete dostat data z jedneho vlakna (robot) do ineho (ui)
 /// prepojenie signal slot je vo funkcii  on_pushButton_9_clicked
@@ -274,17 +284,12 @@ void MainWindow::repaintMap()
 {
     mapPixmap.fill(Qt::black);
     paintMap(_robot.getMap());
+    paintPoints(_robot.getCostMap(),Qt::gray);
 }
 
 void MainWindow::paintMap(std::vector<Point> mapList)
 {
-    QPainter painter(&mapPixmap);
-    painter.setPen(Qt::white);
-
-    for(int i = 0; i < mapList.size();i++){
-        painter.drawPoint(mapList.at(i).x, mapList.at(i).y);
-    }
-
+    paintPoints(mapList, Qt::white);
 }
 
 #ifndef DISABLE_OPENCV

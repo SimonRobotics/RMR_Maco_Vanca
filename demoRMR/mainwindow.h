@@ -85,6 +85,7 @@ private:
   void paintEvent(QPaintEvent *event); // Q_DECL_OVERRIDE;
   int updateLaserPicture;
   std::vector<LaserData> copyOfLaserData;
+  void paintPoints(std::vector<Point> points, QColor color);
   int datacounter;
   std::string ipaddress;
 
