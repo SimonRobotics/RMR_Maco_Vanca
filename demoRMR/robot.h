@@ -20,7 +20,7 @@ Q_DECLARE_METATYPE(skeleton)
 Q_DECLARE_METATYPE(std::vector<LaserData>)
 
 #define TICK_TO_METER 0.000085292090497737556558
-#define MAX_SPEED 200 //mm / s
+#define MAX_SPEED 300 //mm / s
 #define MAX_SPEED_ANG 90 //stupen / s
 
 struct Position{
@@ -95,9 +95,15 @@ private:
   double realDistanceTraveled(unsigned short encoderValue, unsigned short *LastValue);
   double normalizeAngleDeg(double angle);
   double getGoalDirectionRelative(Position target, double x, double y, double fi);
-  std::vector<FreeInterval> getFreeIntervals(std::vector<int> binHistogram,int sectors);
-  int getIntervalWidth(FreeInterval interval, int sectors);
+  std::vector<double> getHistogram(const std::vector<LaserData>& laserData,int sectors, double sectorWidth);
+  void updateBinHistogram(std::vector<int>& binHistogram,std::vector<double>& histogram,int sectors);
+  std::vector<FreeInterval> getFreeIntervals(const std::vector<int>& binHistogram,int sectors);
+  int getIntervalWidth(const FreeInterval& interval, int sectors);
+  std::vector<int> applyMask(const std::vector<int>& binHistogram,
+                             const std::vector<LaserData>& laserData,
+                             int sectors);
   std::vector<double> getCandidates(std::vector<int> binHistogram,int sectors);
+  void addGoalCandidate(std::vector<double>& candidates, std::vector<int>& maskedHistogram, int sectors, double sectorWidth);
   double angleDiffDeg(double a, double b);
   double selectBestCandidate(const std::vector<double>& candidates,
                                     double goalDirection,
