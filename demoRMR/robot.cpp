@@ -123,7 +123,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
         double dis_e = robot::calculateDistanceError(target, x, y);
 
-        if (0.01 > dis_e){
+        if (0.015 > dis_e){
             forwardspeed = 0;
             rotationspeed = 0;
             position_list.erase(position_list.begin());
@@ -409,6 +409,7 @@ std::vector<double> robot::getHistogram(const std::vector<LaserData>& laserData,
 }
 
 void robot::updateBinHistogram(std::vector<int>& binHistogram,std::vector<double>& histogram,int sectors){
+    //zohladni zmenu natocenia aby krajova oblast nebola zle shiftnuta
     int upperLimit = 50;
     int lowerLimit = 30;
     for (int i = 0; i < sectors; i++)
@@ -466,9 +467,11 @@ std::vector<int> robot::applyMask(const std::vector<int>& binHistogram,
 
     double sectorWidth = 360.0 / sectors;
 
-    double minTurnRadius = 300.0;   // mm
+    double minTurnRadius = 300.0;   // mm Treba spravit dynamicky tak aby sa mozna draha vzhladom na aktualny dyn stav robota
     double robotRadius   = 180.0;   // mm
     // double safetyMargin  = 40.0;    // mm
+
+    //Treba vyblokovat vsetky smery pod max natocenim -> blokovany sektor 10 vyblokuj 10 az 18 rovnako na pravo
 
     double forbiddenBand = robotRadius;
 
@@ -490,7 +493,6 @@ std::vector<int> robot::applyMask(const std::vector<int>& binHistogram,
 
         int obstacleSector = int(angleDeg / sectorWidth);
         if (obstacleSector >= sectors) obstacleSector = sectors - 1;
-
 
         if (py > 0.0)
         {
