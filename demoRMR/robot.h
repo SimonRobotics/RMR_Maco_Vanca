@@ -46,6 +46,11 @@ struct Point{
     int y;
 };
 
+struct FreeInterval
+{
+    int start;
+    int end;
+};
 
 class robot : public QObject {
   Q_OBJECT
@@ -85,6 +90,7 @@ private:
   bool initParam;
   bool newLidarData;
   bool createCostmap;
+  bool navigation;
   double d;
   double gyroOffSet;
   int state;
@@ -93,7 +99,12 @@ private:
   unsigned short lastValueLeft;
   unsigned short lastValueRight;
 
-
+  double selectedDirection;
+  bool obstacleAvoidanceActive;
+  bool frontBlocked;
+  double goalDirection;
+  double previousSelectedDirection;
+  std::vector<int> binHistogram;
   ///-----------------------------
   /// toto su rychlosti ktore sa nastavuju setSpeedVal a posielaju v
   /// processThisRobot
@@ -113,7 +124,8 @@ private:
   double interpolateAngle(double a1, double a2, double t1, double t2, double t);
   void printToMap(Position pos);
   void createCostMap(int numOfPixels);
-  int createPath(Point p);
+  bool createPath(Point p);
+  void clear_path();
   QQueue<Position> getPathKeyPositions();
   std::vector<Point> findElementAroundPointCross(Point p, int element);
   std::vector<Point> findElementAroundPoint(Point p, int element);
@@ -122,6 +134,19 @@ private:
   int sign(double x);
   Point xyToMapTransform(Position pos);
   Position mapToXYTransform(Point p);
+  std::vector<double> getCandidates(std::vector<int> binHistogram,int sectors);
+  void addGoalCandidate(std::vector<double>& candidates, std::vector<int>& maskedHistogram, int sectors, double sectorWidth);
+  std::vector<double> getHistogram(const std::vector<LaserData>& laserData,int sectors, double sectorWidth);
+  void updateBinHistogram(std::vector<int>& binHistogram,std::vector<double>& histogram,int sectors);
+  std::vector<int> applyMask(const std::vector<int>& binHistogram, const std::vector<LaserData>& laserData, int sectors);
+  std::vector<FreeInterval> getFreeIntervals(const std::vector<int>& binHistogram,int sectors);
+  int getIntervalWidth(const FreeInterval& interval, int sectors);
+  double angleDiffDeg(double a, double b);
+  double selectBestCandidate(const std::vector<double>& candidates,
+                                    double goalDirection,
+                                    double currentDirection,
+                             double previousDirection);
+
 #ifndef DISABLE_OPENCV
   int processThisCamera(cv::Mat cameraData);
 #endif

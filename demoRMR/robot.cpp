@@ -17,10 +17,19 @@ void robot::initAndStartRobot(std::string ipaddress)
     initParam = false;
     newLidarData = false;
     createCostmap = true;
+    navigation = true;
     d = 10; // s
     forwardspeed=0;
     rotationspeed=0;
     state = 0;
+
+    binHistogram.assign(36,0);
+
+    selectedDirection = 0.0;
+    obstacleAvoidanceActive = false;
+    frontBlocked = false;
+    goalDirection = 0.0;
+    previousSelectedDirection = 0.0;
 
 
     for (int i = 0; i< MAP_SIZE_METERS*PIXEL_PER_METER;i++){
@@ -180,7 +189,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
                 }
             }
 
-            double ang_e = robot::calculateAngleError(target, pastPositions.back().pos.x, pastPositions.back().pos.y, pastPositions.back().angle);
+            double ang_e = selectedDirection;
 
             if (std::abs(ang_e) < 5){
                 rotationspeed = 0;
@@ -213,7 +222,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
         mapList.reserve(copyOfLaserData.size());
         for(int i = 0; i < copyOfLaserData.size();i++){
-            if((copyOfLaserData.at(i).scanDistance > 0 && copyOfLaserData.at(i).scanDistance <= 600) || (copyOfLaserData.at(i).scanDistance >= 700 && copyOfLaserData.at(i).scanDistance <= 3000)){
+            if((copyOfLaserData.at(i).scanDistance > 0 && copyOfLaserData.at(i).scanDistance <= 500) || (copyOfLaserData.at(i).scanDistance >= 750 && copyOfLaserData.at(i).scanDistance <= 3000)){
                 bool exist = false;
                 double lastAngle;
                 double angle;
@@ -268,31 +277,34 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         createCostmap = true;
     }
     if(state == 2){
-        if(createCostmap && !position_list.empty()){
+        if(createCostmap){
             createCostMap(5);
-
+            createCostmap = false;
+        }
+        if(navigation && !position_list.empty()){
+            navigation = false;
             Position myP;
             myP = position_list.back();
-            createPath(xyToMapTransform(myP));
+            if (createPath(xyToMapTransform(myP))){
+                QQueue<Position> pp;
+
+                pp = getPathKeyPositions();
 
 
-            QQueue<Position> pp;
+                emit resetMap();
+                emit publishWaypoints(pp);
 
-            pp = getPathKeyPositions();
+                position_list.clear();
 
-
-            emit resetMap();
-            emit publishWaypoints(pp);
-
-            position_list.clear();
-
-            for(auto i: pp){
-                position_list.push_back(i);
+                for(auto i: pp){
+                    position_list.push_back(i);
+                }
+                position_list.push_back(myP);
             }
-            position_list.push_back(myP);
-
-            createCostmap = false;
-
+            clear_path();
+        }
+        if(position_list.empty()){
+            navigation = true;
         }
 
     }
@@ -396,7 +408,7 @@ void robot::createCostMap(int numOfPixels)
     }
 }
 
-int robot::createPath(Point p)
+bool robot::createPath(Point p)
 {
     map[p.x][p.y] = -1;
     std::vector<Point> f = findLowerThenElementAroundPoint(p,1);
@@ -429,11 +441,22 @@ int robot::createPath(Point p)
     Point robotPosition = xyToMapTransform(pastPositions.back().pos);
 
     if(map[robotPosition.x][robotPosition.y] <= k){
-        return 1;
+        return false;
     }else{
-        return 0;
+        return true;
     }
 
+}
+
+void robot::clear_path()
+{
+    for (int i = 0; i< MAP_SIZE_METERS*PIXEL_PER_METER;i++){
+        for (int j = 0; j< MAP_SIZE_METERS*PIXEL_PER_METER;j++){
+            if (map[i][j] != 1){
+                map[i][j] = 0;
+            }
+        }
+    }
 }
 
 QQueue<Position> robot::getPathKeyPositions()
@@ -613,6 +636,61 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
 {
     copyOfLaserData=laserData;
 
+    int sectors = binHistogram.size();
+    double sectorWidth = 360.0 / sectors;
+
+    std::vector<double> histogram = getHistogram(laserData,sectors,sectorWidth);
+
+    updateBinHistogram(binHistogram,histogram,sectors);
+
+    std::vector<int> maskedHistogram = applyMask(binHistogram, laserData, sectors);
+
+    // std::cout << "BIN: ";
+    // for (int i = 0; i < sectors; i++)
+    // {
+    //     std::cout << binHistogram[i];
+    // }
+    // std::cout << std::endl;
+
+    // std::cout << "MSK: ";
+    // for (int i = 0; i < sectors; i++)
+    // {
+    //     std::cout << maskedHistogram[i];
+    // }
+    // std::cout << std::endl;
+
+
+    std::vector<double> candidates = getCandidates(maskedHistogram,sectors);
+
+    addGoalCandidate(candidates,maskedHistogram,sectors,sectorWidth);
+
+    for(int i = 0;i<candidates.size();i++){
+        std::cout << "Kandidat " << i + 1 << " je " << candidates[i] << " stupnov." << std::endl;
+    }
+
+    if (!position_list.empty() && !candidates.empty())
+    {
+        Position target = position_list.front();
+
+        double goalDirection = robot::calculateAngleError(target, pastPositions.back().pos.x, pastPositions.back().pos.y, pastPositions.back().angle);
+        if (goalDirection < 0.0) goalDirection += 360.0;
+
+        double currentDirection = 0.0; // rovno pred robot
+        double previousDirection = previousSelectedDirection;
+        if (previousDirection < 0.0) previousDirection += 360.0;
+
+        selectedDirection = selectBestCandidate(candidates,
+                                                goalDirection,
+                                                currentDirection,
+                                                previousDirection);
+
+        previousSelectedDirection = selectedDirection;
+    }
+
+    std::cout << "selectedDirection = " << selectedDirection << std::endl;
+
+
+
     newLidarData = true;
     //tu mozete robit s datami z lidaru.. napriklad najst prekazky, zapisat do mapy. naplanovat ako sa prekazke vyhnut.
     // ale nic vypoctovo narocne - to iste vlakno ktore cita data z lidaru
@@ -657,6 +735,331 @@ double robot::realDistanceTraveled(unsigned short encoderValue, unsigned short *
         diff += 65536;
 
     return (double)diff*TICK_TO_METER;
+}
+
+std::vector<double> robot::getCandidates(std::vector<int> binHistogram,int sectors)
+{
+    std::vector<double> candidates;
+    double candidate;
+    double sectorWidth = 360.0 / sectors;
+    std::vector<FreeInterval> intervals = getFreeIntervals(binHistogram,sectors);
+    int width;
+    for(auto i:intervals){
+        width = getIntervalWidth(i,sectors);
+        if(width < 5){
+            candidate = sectorWidth * width / 2 + sectorWidth * i.start;
+            if(candidate >= 360) candidate -= 360;
+            candidates.push_back(candidate);
+        }else{
+            candidate = i.start * sectorWidth + sectorWidth;
+            while(candidate >= 360.0) candidate -= 360.0;
+            while(candidate < 0.0) candidate += 360.0;
+            candidates.push_back(candidate);
+            candidate = i.end * sectorWidth - sectorWidth;
+            while(candidate >= 360.0) candidate -= 360.0;
+            while(candidate < 0.0) candidate += 360.0;
+            candidates.push_back(candidate);
+        }
+    }
+    return candidates;
+}
+
+void robot::addGoalCandidate(std::vector<double>& candidates, std::vector<int>& maskedHistogram, int sectors, double sectorWidth){
+    if (!position_list.empty())
+    {
+        Position target = position_list.front();
+
+        double goalCandidate = robot::calculateAngleError(target, pastPositions.back().pos.x, pastPositions.back().pos.y, pastPositions.back().angle);
+
+        if (goalCandidate < 0.0)
+            goalCandidate += 360.0;
+
+        int goalSector = int(goalCandidate / sectorWidth);
+        if (goalSector >= sectors) goalSector = sectors - 1;
+
+        if (maskedHistogram[goalSector] == 0)
+        {
+            bool alreadyThere = false;
+
+            for (double c : candidates)
+            {
+                if (std::abs(c - goalCandidate) < 0.001)
+                {
+                    alreadyThere = true;
+                    break;
+                }
+            }
+
+            if (!alreadyThere)
+                candidates.push_back(goalCandidate);
+        }
+    }
+}
+
+std::vector<double> robot::getHistogram(const std::vector<LaserData>& laserData,int sectors, double sectorWidth){
+
+    std::vector<double> histogram(sectors,0.0);
+
+    double mi;
+    double ci = 1;
+    double a = 10;
+    double b = 0.01;
+
+    int CurSector = 0;
+
+    double safeRadius = 150.0 + 80.0;
+
+    for (auto &p : laserData)
+    {
+
+        double angle = 360.0 - p.scanAngle; // 1 - 360
+        if(angle == 360.0) angle = 0; // 0 - 359
+        double dist  = p.scanDistance; // mm
+
+        if (dist <= 0.0) continue;
+
+        //std::cout << "Uhol: " << angle << " Vzdialenost: " << dist << std::endl;
+
+        mi = std::pow(ci,2)*(a-b*dist);
+        if (mi < 0) mi = 0;
+
+        double gamma;
+
+        if (dist <= safeRadius)
+        {
+            gamma = 90.0;
+        }
+        else
+        {
+            gamma = qRadiansToDegrees(std::asin(safeRadius / dist));
+        }
+
+        double strAngle = angle - gamma;
+        double endAngle = angle + gamma;
+
+        while (strAngle < 0.0) strAngle += 360.0;
+        while (strAngle >= 360.0) strAngle -= 360.0;
+        while (endAngle < 0.0) endAngle += 360.0;
+        while (endAngle >= 360.0) endAngle -= 360.0;
+
+        int strSector = int(strAngle/sectorWidth);
+        int endSector = int(endAngle/sectorWidth);
+
+        if (strSector <= endSector)
+        {
+            for (int s = strSector; s <= endSector; s++)
+            {
+                histogram[s] += mi;
+            }
+        }
+        else
+        {
+            for (int s = strSector; s < sectors; s++)
+            {
+                histogram[s] += mi;
+            }
+            for (int s = 0; s <= endSector; s++)
+            {
+                histogram[s] += mi;
+            }
+        }
+
+        // CurSector = int(angle/sectorWidth);
+        // if(CurSector == 36) CurSector = 0;
+        // histogram[CurSector] += mi;
+
+    }
+
+    // for (int i = 0; i < sectors; i++)
+    // {
+    //     std::cout << "Sektor " << i
+    //               << " [" << i*sectorWidth << ", " << (i+1)*sectorWidth << ") : "
+    //               << histogram[i] << std::endl;
+
+    // }
+    return histogram;
+}
+
+void robot::updateBinHistogram(std::vector<int>& binHistogram,std::vector<double>& histogram,int sectors){
+    //zohladni zmenu natocenia aby krajova oblast nebola zle shiftnuta
+    int upperLimit = 50;
+    int lowerLimit = 30;
+    for (int i = 0; i < sectors; i++)
+    {
+        if(histogram[i] >= upperLimit) binHistogram[i] = 1;
+        else if(histogram[i] <= lowerLimit) binHistogram[i] = 0;
+    }
+}
+
+std::vector<int> robot::applyMask(const std::vector<int>& binHistogram,
+                                  const std::vector<LaserData>& laserData,
+                                  int sectors)
+{
+    std::vector<int> maskedHistogram = binHistogram;
+
+    double sectorWidth = 360.0 / sectors;
+
+    double minTurnRadius = 300.0;   // mm Treba spravit dynamicky tak aby sa mozna draha vzhladom na aktualny dyn stav robota
+    double robotRadius   = 180.0;   // mm
+    // double safetyMargin  = 40.0;    // mm
+
+    //Treba vyblokovat vsetky smery pod max natocenim -> blokovany sektor 10 vyblokuj 10 az 18 rovnako na pravo
+
+    double forbiddenBand = robotRadius;
+
+    for (const auto &p : laserData)
+    {
+        double angleDeg = 360.0 - p.scanAngle;
+        if (angleDeg >= 360.0) angleDeg -= 360.0;
+
+        double dist = p.scanDistance;
+        if (dist <= 0.0) continue;
+
+        double angleRad = qDegreesToRadians(angleDeg);
+
+        double px = dist * std::cos(angleRad);
+        double py = dist * std::sin(angleRad);
+
+        double dLeft  = std::sqrt(pow(px,2) + pow((py - minTurnRadius),2));
+        double dRight = std::sqrt(pow(px,2) + pow((py + minTurnRadius),2));
+
+        int obstacleSector = int(angleDeg / sectorWidth);
+        if (obstacleSector >= sectors) obstacleSector = sectors - 1;
+
+        if (py > 0.0)
+        {
+            double err = std::abs(dLeft - minTurnRadius);
+
+            if (err <= forbiddenBand)
+            {
+                int extra = 1;
+
+                if (err < forbiddenBand * 0.66) extra = 2;
+                if (err < forbiddenBand * 0.33) extra = 3;
+
+                for (int k = 0; k <= extra; k++)
+                {
+                    int s = obstacleSector + k;
+                    while (s >= sectors) s -= sectors;
+
+                    double centerAngle = s * sectorWidth + sectorWidth / 2.0;
+                    double relAngle = centerAngle;
+                    if (relAngle > 180.0) relAngle -= 360.0;
+
+                    if (relAngle > 0.0)
+                        maskedHistogram[s] = 1;
+                }
+            }
+        }
+
+        if (py < 0.0)
+        {
+            double err = std::abs(dRight - minTurnRadius);
+
+            if (err <= forbiddenBand)
+            {
+                int extra = 1;
+
+                if (err < forbiddenBand * 0.66) extra = 2;
+                if (err < forbiddenBand * 0.33) extra = 3;
+
+                for (int k = 0; k <= extra; k++)
+                {
+                    int s = obstacleSector - k;
+                    while (s < 0) s += sectors;
+
+                    double centerAngle = s * sectorWidth + sectorWidth / 2.0;
+                    double relAngle = centerAngle;
+                    if (relAngle > 180.0) relAngle -= 360.0;
+
+                    if (relAngle < 0.0)
+                        maskedHistogram[s] = 1;
+                }
+            }
+        }
+    }
+    return maskedHistogram;
+}
+
+std::vector<FreeInterval> robot::getFreeIntervals(const std::vector<int>& binHistogram,int sectors)
+{
+    bool inInterval = false;
+    std::vector<FreeInterval> intervals;
+    FreeInterval p;
+    for(int h = 0; h < binHistogram.size();h++)
+    {
+        if(binHistogram[h] == 0 && inInterval == false)
+        {
+            p.start = h;
+            inInterval = true;
+        }
+        else if(binHistogram[h] == 1 && inInterval == true){
+            p.end = h - 1;
+            inInterval = false;
+            intervals.push_back(p);
+        }
+    }
+    if(inInterval){
+        p.end = sectors - 1;
+        intervals.push_back(p);
+    }
+    if(intervals.size() > 1 && intervals.front().start == 0 && intervals.back().end == sectors - 1){
+        p.start = intervals.back().start;
+        p.end = intervals.front().end;
+        intervals.erase(intervals.begin());
+        intervals.pop_back();
+        intervals.push_back(p);
+    }
+    return intervals;
+}
+
+int robot::getIntervalWidth(const FreeInterval& interval, int sectors)
+{
+    if (interval.end >= interval.start)
+        return interval.end - interval.start + 1;
+    else
+        return (sectors - interval.start) + (interval.end + 1);
+}
+
+double robot::angleDiffDeg(double a, double b)
+{
+    double diff = std::abs(a - b);
+    if (diff > 180.0) diff = 360.0 - diff;
+    return diff;
+}
+
+double robot::selectBestCandidate(const std::vector<double>& candidates,
+                                  double goalDirection,
+                                  double currentDirection,
+                                  double previousDirection)
+{
+    if (candidates.empty())
+        return currentDirection;
+
+    double wg = 1.2;   // ciel
+    double wc = 1.0;   // aktualny smer
+    double wp = 0.8;   // predchadzajuci vyber
+
+    double bestCandidate = candidates[0];
+    double bestCost = 1e9;
+
+    for (double c : candidates)
+    {
+        double cost =
+            wg * angleDiffDeg(c, goalDirection) +
+            wc * angleDiffDeg(c, currentDirection) +
+            wp * angleDiffDeg(c, previousDirection);
+
+        std::cout << "cost = "<< wg * angleDiffDeg(c, goalDirection) <<" + " << wc * angleDiffDeg(c, currentDirection)<<" + "<< wp * angleDiffDeg(c, previousDirection) <<" = " << cost <<std::endl;
+
+        if (cost < bestCost)
+        {
+            bestCost = cost;
+            bestCandidate = c;
+        }
+    }
+
+    return bestCandidate;
 }
 
   #ifndef DISABLE_OPENCV
