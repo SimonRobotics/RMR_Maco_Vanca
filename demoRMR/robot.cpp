@@ -189,26 +189,26 @@ int robot::processThisRobot(const TKobukiData &robotdata)
                 }
             }
 
-            double ang_e = selectedDirection;
+            double ang_e = normalizeAngleDeg(selectedDirection);
 
             if (std::abs(ang_e) < 5){
                 rotationspeed = 0;
             }
-            else if (std::abs(ang_e) > 45){
+            else if (std::abs(ang_e) > 90){
                 forwardspeed = 0;
-                if(ang_e*0.05*MAX_SPEED_ANG > MAX_SPEED_ANG){
-                    rotationspeed =robot::ramp(sign(ang_e)*MAX_SPEED_ANG, 0.01,rotationspeed);
+                if(std::abs(ang_e*0.05*MAX_SPEED_ANG) > MAX_SPEED_ANG){
+                    rotationspeed =robot::ramp(sign(ang_e)*MAX_SPEED_ANG, 0.05,rotationspeed);
                 }
                 else{
-                    rotationspeed = robot::ramp(MAX_SPEED_ANG*0.05*ang_e, 0.01,rotationspeed);
+                    rotationspeed = robot::ramp(MAX_SPEED_ANG*0.05*ang_e, 0.05,rotationspeed);
                 }
             }
             else{
-                if(ang_e*0.05*MAX_SPEED_ANG > MAX_SPEED_ANG){
-                    rotationspeed = robot::ramp(sign(ang_e)*MAX_SPEED_ANG, 0.01,rotationspeed);
+                if(std::abs(ang_e*0.05*MAX_SPEED_ANG) > MAX_SPEED_ANG){
+                    rotationspeed = robot::ramp(sign(ang_e)*MAX_SPEED_ANG, 0.05,rotationspeed);
                 }
                 else{
-                    rotationspeed = robot::ramp(MAX_SPEED_ANG*0.05*ang_e, 0.01,rotationspeed);
+                    rotationspeed = robot::ramp(MAX_SPEED_ANG*0.05*ang_e, 0.05,rotationspeed);
                 }
             }
         }
@@ -278,7 +278,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     }
     if(state == 2){
         if(createCostmap){
-            createCostMap(5);
+            createCostMap(9);
             createCostmap = false;
         }
         if(navigation && !position_list.empty()){
@@ -621,6 +621,13 @@ double robot::calculateDistanceError(Position setPoint, double x, double y){
     return std::sqrt(std::pow(setPoint.x - x,2)+std::pow(setPoint.y-y,2));
 }
 
+double robot::normalizeAngleDeg(double angle)
+{
+    while (angle > 180.0) angle -= 360.0;
+    while (angle < -180.0) angle += 360.0;
+    return angle;
+}
+
 double robot::calculateAngleError(Position setPoint, double x, double y, double fi) {
     double desiredAngle = std::atan2(setPoint.y - y, setPoint.x - x) * 180.0 / M_PI;
     double error = desiredAngle - fi;
@@ -716,6 +723,8 @@ double robot::ramp(double target, double d, double y){
     return y;
 }
 
+
+
 double robot::getDistanceFromWhells(double leftWheel, double rightWheel)
 {
     return (leftWheel+rightWheel)/2;
@@ -807,7 +816,7 @@ std::vector<double> robot::getHistogram(const std::vector<LaserData>& laserData,
 
     int CurSector = 0;
 
-    double safeRadius = 150.0 + 80.0;
+    double safeRadius = 150.0 + 50.0;
 
     for (auto &p : laserData)
     {
@@ -882,8 +891,8 @@ std::vector<double> robot::getHistogram(const std::vector<LaserData>& laserData,
 
 void robot::updateBinHistogram(std::vector<int>& binHistogram,std::vector<double>& histogram,int sectors){
     //zohladni zmenu natocenia aby krajova oblast nebola zle shiftnuta
-    int upperLimit = 50;
-    int lowerLimit = 30;
+    int upperLimit = 90;
+    int lowerLimit = 70;
     for (int i = 0; i < sectors; i++)
     {
         if(histogram[i] >= upperLimit) binHistogram[i] = 1;
@@ -1036,7 +1045,7 @@ double robot::selectBestCandidate(const std::vector<double>& candidates,
     if (candidates.empty())
         return currentDirection;
 
-    double wg = 1.2;   // ciel
+    double wg = 2.0;   // ciel
     double wc = 1.0;   // aktualny smer
     double wp = 0.8;   // predchadzajuci vyber
 

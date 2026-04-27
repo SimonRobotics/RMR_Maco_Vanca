@@ -24,8 +24,8 @@ Q_DECLARE_METATYPE(skeleton)
 Q_DECLARE_METATYPE(std::vector<LaserData>)
 
 #define TICK_TO_METER 0.000085292090497737556558
-#define MAX_SPEED 200 //mm / s
-#define MAX_SPEED_ANG 0.4 //stupen / s
+#define MAX_SPEED 300 //mm / s
+#define MAX_SPEED_ANG 0.6 //stupen / s
 #define MAP_SIZE_METERS 14//m
 #define PIXEL_PER_METER 20// px / m
 #define ROBOT_SIZE_MM 350 /mm
@@ -116,6 +116,7 @@ private:
   int processThisRobot(const TKobukiData &robotdata);
   double ramp(double target, double d, double y);
   double calculateDistanceError(Position setPoint, double x, double y);
+  double normalizeAngleDeg(double angle);
   double calculateAngleError(Position setPoint, double x, double y, double fi);
   double getDistanceFromWhells(double leftWheel, double rightWheel);
   double realDistanceTraveled(unsigned short encoderValue, unsigned short *LastValue);
