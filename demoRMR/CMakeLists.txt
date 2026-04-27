@@ -17,6 +17,7 @@ qt_add_executable(${PROJECT_NAME} WIN32
     ${SOURCES}
     ${HEADERS}
     mainwindow.ui
+
 )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE ROBOT_LIBRARY)

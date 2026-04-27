@@ -2,6 +2,9 @@
 #define MAINWINDOW_H
 #include <QMainWindow>
 #include <QTimer>
+#include <QMouseEvent>
+#include <QDebug>
+#include <QQueue>
 #include <iostream>
 // #include<arpa/inet.h>
 // #include<unistd.h>
@@ -29,6 +32,7 @@ class MainWindow : public QMainWindow {
   Q_OBJECT
 
 public:
+
 #ifndef DISABLE_OPENCV
   bool useCamera1;
   int actIndex;
@@ -57,6 +61,10 @@ private slots:
 
   void on_pushButton_clicked();
 
+  void indexChanged(int index);
+
+  void mousePressEvent(QMouseEvent *event);
+
   int paintThisLidar(const std::vector<LaserData> &laserData);
 #ifndef DISABLE_OPENCV
   int paintThisCamera(const cv::Mat &cameraData);
@@ -65,6 +73,11 @@ private slots:
   int paintThisSkeleton(const skeleton &skeledata);
 #endif
 private:
+
+  QPixmap mapPixmap;
+  QRect rect2;
+  int mapSizeMeters;
+  int pixelsPerMeter;
   robot _robot;
   //--skuste tu nic nevymazat... pridavajte co chcete, ale pri odoberani by sa
   // mohol stat nejaky drobny problem, co bude vyhadzovat chyby
@@ -72,6 +85,7 @@ private:
   void paintEvent(QPaintEvent *event); // Q_DECL_OVERRIDE;
   int updateLaserPicture;
   std::vector<LaserData> copyOfLaserData;
+  void paintPoints(std::vector<Point> points, QColor color);
   int datacounter;
   std::string ipaddress;
 
@@ -81,6 +95,9 @@ private:
 #endif
 public slots:
   void setUiValues(double robotX, double robotY, double robotFi);
+  void paintMap(std::vector<Point> mapList);
+  void paintWaypoints(QQueue<Position> waypointList);
+  void repaintMap();
 };
 
 #endif // MAINWINDOW_H

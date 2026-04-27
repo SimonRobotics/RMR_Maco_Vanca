@@ -1,4 +1,4 @@
-#include "robot.h"
+    #include "robot.h"
 
 robot::robot(QObject *parent) : QObject(parent)
 {
@@ -15,12 +15,14 @@ void robot::initAndStartRobot(std::string ipaddress)
 {
     useDirectCommands = 0;
     initParam = false;
-    dt = 10; // s
+    newLidarData = false;
+    createCostmap = true;
+    navigation = true;
+    d = 10; // s
     forwardspeed=0;
     rotationspeed=0;
-    x = 0;
-    y = 0;
-    fi = 0;
+    state = 0;
+
     binHistogram.assign(36,0);
 
     selectedDirection = 0.0;
@@ -29,30 +31,12 @@ void robot::initAndStartRobot(std::string ipaddress)
     goalDirection = 0.0;
     previousSelectedDirection = 0.0;
 
-    // Position p1;
-    // p1.x = 0;
-    // p1.y = 2;
-    // position_list.push_back(p1);
 
-    Position p2;
-    p2.x = 2;
-    p2.y = -1;
-    position_list.push_back(p2);
-
-    // Position p3;
-    // p3.x = 2.8;
-    // p3.y = 3;
-    // position_list.push_back(p3);
-
-    // Position p4;
-    // p3.x = 5.0;
-    // p3.y = 0.55;
-    // position_list.push_back(p3);
-
-    // Position p5;
-    // p3.x = 5.0;
-    // p3.y = 2.0;
-    // position_list.push_back(p3);
+    for (int i = 0; i< MAP_SIZE_METERS*PIXEL_PER_METER;i++){
+        for (int j = 0; j< MAP_SIZE_METERS*PIXEL_PER_METER;j++){
+            map[i][j] = 0;
+        }
+    }
 
     ///setovanie veci na komunikaciu s robotom/lidarom/kamerou.. su tam adresa porty a callback.. laser ma ze sa da dat callback aj ako lambda.
     /// lambdy su super, setria miesto a ak su rozumnej dlzky,tak aj prehladnost... ak ste o nich nic nepoculi poradte sa s vasim doktorom alebo lekarnikom...
@@ -78,6 +62,46 @@ void robot::setSpeedVal(double forw, double rots)
     useDirectCommands=0;
 }
 
+void robot::addWaypoint(double x, double y)
+{
+    Position pos;
+    pos.x = x;
+    pos.y = y;
+    position_list.push_back(pos);
+}
+
+std::vector<Point> robot::getMap()
+{
+    std::vector<Point> mm;
+    for (int i = 0; i< MAP_SIZE_METERS*PIXEL_PER_METER;i++){
+        for (int j = 0; j< MAP_SIZE_METERS*PIXEL_PER_METER;j++){
+            if (map[i][j] == 1){
+                Point p;
+                p.x = i;
+                p.y = j;
+                mm.push_back(p);
+            }
+        }
+    }
+    return mm;
+}
+
+std::vector<Point> robot::getCostMap()
+{
+    std::vector<Point> mm;
+    for (int i = 0; i< MAP_SIZE_METERS*PIXEL_PER_METER;i++){
+        for (int j = 0; j< MAP_SIZE_METERS*PIXEL_PER_METER;j++){
+            if (map[i][j] > 1){
+                Point p;
+                p.x = i;
+                p.y = j;
+                mm.push_back(p);
+            }
+        }
+    }
+    return mm;
+}
+
 void robot::setSpeed(double forw, double rots)
 {
     if(forw==0 && rots!=0)
@@ -91,79 +115,207 @@ void robot::setSpeed(double forw, double rots)
     useDirectCommands=1;
 }
 
+void robot::setState(int state)
+{
+    robot::state = state;
+}
+int robot::getState()
+{
+    return robot::state;
+}
+
 ///toto je calback na data z robota, ktory ste podhodili robotu vo funkcii initAndStartRobot
 /// vola sa vzdy ked dojdu nove data z robota. nemusite nic riesit, proste sa to stane
 int robot::processThisRobot(const TKobukiData &robotdata)
 {
+
     if (!robot::initParam){
         lastValueLeft = robotdata.EncoderLeft;
         lastValueRight = robotdata.EncoderRight;
-        gyroOffSet = robotdata.GyroAngle / 100.0;
+
+        gyroOffSet = robotdata.GyroAngle/100;
+
+        Position startPosition;
+        startPosition.x = 0;
+        startPosition.y = 0;
+        TimePosition startTimePosition;
+        startTimePosition.angle = robotdata.GyroAngle/100- gyroOffSet;
+        startTimePosition.timeStamp = (double)robotdata.synctimestamp;
+        startTimePosition.pos = startPosition;
+        pastPositions.push_back(startTimePosition);
+        pastPositions.push_back(startTimePosition);
+        pastPositions.push_back(startTimePosition);
+        pastPositions.push_back(startTimePosition);
+        pastPositions.push_back(startTimePosition);
+        pastPositions.push_back(startTimePosition);
+        pastPositions.push_back(startTimePosition);
+        pastPositions.push_back(startTimePosition);
+        pastPositions.push_back(startTimePosition);
+
         robot::initParam = true;
     }
+
+    TimePosition TimePosition;
+    TimePosition.timeStamp = (double)robotdata.synctimestamp;
     ///tu mozete robit s datami z robota///
     double lenghtTraveled = robot::getDistanceFromWhells(realDistanceTraveled(robotdata.EncoderLeft, &lastValueLeft),realDistanceTraveled(robotdata.EncoderRight, &lastValueRight)); // m
 
-    fi = robotdata.GyroAngle/100 - gyroOffSet; // rad
+    TimePosition.angle = robotdata.GyroAngle/100- gyroOffSet;
 
-    double angle = qDegreesToRadians(fi); //stupne
+    double a = qDegreesToRadians(TimePosition.angle);
 
-    x += lenghtTraveled * std::cos(angle); //m
-    y += lenghtTraveled * std::sin(angle); //m
+    TimePosition.pos.x = pastPositions.back().pos.x + lenghtTraveled * std::cos(a); //m
+    TimePosition.pos.y = pastPositions.back().pos.y + lenghtTraveled * std::sin(a); //m
 
-    //táto logika je fajn na to aby sa zmenilo smerovanie robota stačí upraviť target
-    //čiže na ang_e sa primárne nenahodí predok position listu ale vhodný kanditátsky smer
-    // a robot proste ide vpred kým nie je v cieli resp. nenarazí
-    //ale treba pridať zastavenie v prípade, že je fakt blízko pri prekážke musí zastaviť,
-    //uhlová rýchlosť sa tam meniť môže ako chce v tamkom prípade, čiže tú musím nejako získať
-    //aj min vzdialenosť z celého rozsahu lidaru
+    pastPositions.push_back(TimePosition);
 
-    if (!position_list.empty()){
-        auto target = position_list.front(); // prehodiť na kandidátsky smer
+    if (state == 1 | state == 2){
+        if (!position_list.empty()){
+            auto target = position_list.front();
 
-        double dis_e = robot::calculateDistanceError(target, x, y);
+            double dis_e = robot::calculateDistanceError(target, pastPositions.back().pos.x, pastPositions.back().pos.y);
 
-        if (0.015 > dis_e){
+            if (0.1 > dis_e){
+                forwardspeed = 0;
+                rotationspeed = 0;
+                position_list.pop_front();
+                emit resetMap();
+                emit publishWaypoints(position_list);
+            } else {
+                if (dis_e*2*MAX_SPEED > MAX_SPEED){
+                    forwardspeed = robot::ramp(MAX_SPEED,d,forwardspeed);
+                }else{
+                    forwardspeed = robot::ramp(dis_e*2*MAX_SPEED,d,forwardspeed);
+                }
+            }
+
+            double ang_e = normalizeAngleDeg(selectedDirection);
+
+            if (std::abs(ang_e) < 5){
+                rotationspeed = 0;
+            }
+            else if (std::abs(ang_e) > 90){
+                forwardspeed = 0;
+                if(std::abs(ang_e*0.05*MAX_SPEED_ANG) > MAX_SPEED_ANG){
+                    rotationspeed =robot::ramp(sign(ang_e)*MAX_SPEED_ANG, 0.05,rotationspeed);
+                }
+                else{
+                    rotationspeed = robot::ramp(MAX_SPEED_ANG*0.05*ang_e, 0.05,rotationspeed);
+                }
+            }
+            else{
+                if(std::abs(ang_e*0.05*MAX_SPEED_ANG) > MAX_SPEED_ANG){
+                    rotationspeed = robot::ramp(sign(ang_e)*MAX_SPEED_ANG, 0.05,rotationspeed);
+                }
+                else{
+                    rotationspeed = robot::ramp(MAX_SPEED_ANG*0.05*ang_e, 0.05,rotationspeed);
+                }
+            }
+        }
+        else{
             forwardspeed = 0;
             rotationspeed = 0;
-            position_list.erase(position_list.begin());
-        } else {
-            if (dis_e*2*MAX_SPEED > MAX_SPEED){
-                forwardspeed = robot::ramp(MAX_SPEED,dt,forwardspeed);
-            }else{
-                forwardspeed = robot::ramp(dis_e*2*MAX_SPEED,dt,forwardspeed);
+        }
+    }
+    if (state == 1 && newLidarData){
+        std::vector<Point> mapList;
+
+        mapList.reserve(copyOfLaserData.size());
+        for(int i = 0; i < copyOfLaserData.size();i++){
+            if((copyOfLaserData.at(i).scanDistance > 0 && copyOfLaserData.at(i).scanDistance <= 500) || (copyOfLaserData.at(i).scanDistance >= 750 && copyOfLaserData.at(i).scanDistance <= 3000)){
+                bool exist = false;
+                double lastAngle;
+                double angle;
+                double lastX;
+                double lastY;
+                double x;
+                double y;
+                double lastt;
+                double t;
+                double it;
+
+                for(int j = 0;j<pastPositions.size()-1;j++){
+                    if((pastPositions.at(pastPositions.size()-1-j).timeStamp <= (double)copyOfLaserData.at(i).timestamp) && ((double)copyOfLaserData.at(i).timestamp <= pastPositions.at(pastPositions.size()-j).timeStamp)){
+                        lastAngle = pastPositions.at(pastPositions.size()-1-j).angle;
+                        angle = pastPositions.at(pastPositions.size()-j).angle;
+                        lastX = pastPositions.at(pastPositions.size()-1-j).pos.x;
+                        lastY = pastPositions.at(pastPositions.size()-1-j).pos.y;
+                        x = pastPositions.at(pastPositions.size()-j).pos.x;
+                        y = pastPositions.at(pastPositions.size()-j).pos.y;
+                        lastt =pastPositions.at(pastPositions.size()-1-j).timeStamp;
+                        t =pastPositions.at(pastPositions.size()-j).timeStamp;
+                        it = (double)copyOfLaserData.at(i).timestamp;
+                        exist =true;
+                        break;
+                    }
+                }
+
+                if(exist){
+                    double iangle = interpolateAngle(lastAngle,angle,lastt,t,it);
+
+                    double lidx = (copyOfLaserData.at(i).scanDistance*std::cos(qDegreesToRadians(iangle - copyOfLaserData.at(i).scanAngle)))/1000;
+                    double lidy = (copyOfLaserData.at(i).scanDistance*std::sin(qDegreesToRadians(iangle - copyOfLaserData.at(i).scanAngle)))/1000;
+
+                    double ix = interpolate(lastX, x, lastt, t, it);
+                    double iy = interpolate(lastY, y, lastt, t, it);
+
+                    Position pos;
+
+                    pos.x = lidx + ix;
+                    pos.y = lidy + iy;
+
+                    mapList.push_back(xyToMapTransform(pos));
+
+                    printToMap(pos);
+                }
             }
         }
 
-        //double ang_e = robot::calculateAngleError(target, x, y, fi);
-
-        double ang_e = normalizeAngleDeg(selectedDirection);
-
-        if (std::abs(ang_e) < 5){
-            rotationspeed = 0;
-        }
-        else if (std::abs(ang_e) > 120){
-            forwardspeed = 0;
-            rotationspeed = 0.02*ang_e;
-        }
-        else{
-            rotationspeed = 0.02*ang_e;
-        }
+        emit publishMap(mapList);
+        emit publishWaypoints(position_list);
+        newLidarData = false;
+        createCostmap = true;
     }
-    else
-    {
-        forwardspeed = 0;
-        rotationspeed = 0;
+    if(state == 2){
+        if(createCostmap){
+            createCostMap(9);
+            createCostmap = false;
+        }
+        if(navigation && !position_list.empty()){
+            navigation = false;
+            Position myP;
+            myP = position_list.back();
+            if (createPath(xyToMapTransform(myP))){
+                QQueue<Position> pp;
+
+                pp = getPathKeyPositions();
+
+
+                emit resetMap();
+                emit publishWaypoints(pp);
+
+                position_list.clear();
+
+                for(auto i: pp){
+                    position_list.push_back(i);
+                }
+                position_list.push_back(myP);
+            }
+            clear_path();
+        }
+        if(position_list.empty()){
+            navigation = true;
+        }
+
     }
 
-
+    pastPositions.erase(pastPositions.begin());
 
 ///TU PISTE KOD... TOTO JE TO MIESTO KED NEVIETE KDE ZACAT,TAK JE TO NAOZAJ TU. AK AJ TAK NEVIETE, SPYTAJTE SA CVICIACEHO MA TU NATO STRING KTORY DA DO HLADANIA XXX
 
     ///kazdy piaty krat, aby to ui moc nepreblikavalo..
     if(datacounter%5==0)
     {
-
         ///ak nastavite hodnoty priamo do prvkov okna,ako je to na tychto zakomentovanych riadkoch tak sa moze stat ze vam program padne
         // ui->lineEdit_2->setText(QString::number(robotdata.EncoderRight));
         //ui->lineEdit_3->setText(QString::number(robotdata.EncoderLeft));
@@ -172,12 +324,13 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         /// okno pocuva vo svojom slote a vasu premennu nastavi tak ako chcete. prikaz emit to presne takto spravi
         /// viac o signal slotoch tu: https://doc.qt.io/qt-5/signalsandslots.html
         ///posielame sem nezmysli.. pohrajte sa nech sem idu zmysluplne veci
-        emit publishPosition(x,y,fi);
+        emit publishPosition(pastPositions.back().pos.x,pastPositions.back().pos.y,pastPositions.back().angle);
         ///toto neodporucam na nejake komplikovane struktury.signal slot robi kopiu dat. radsej vtedy posielajte
         /// prazdny signal a slot bude vykreslovat strukturu (vtedy ju musite mat samozrejme ako member premmennu v mainwindow.ak u niekoho najdem globalnu premennu,tak bude cistit bludisko zubnou kefkou.. kefku dodam)
         /// vtedy ale odporucam pouzit mutex, aby sa vam nestalo ze budete pocas vypisovania prepisovat niekde inde
 
     }
+
     ///---tu sa posielaju rychlosti do robota... vklude zakomentujte ak si chcete spravit svoje
     if(useDirectCommands==0)
     {
@@ -196,8 +349,283 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
 }
 
+double robot::distance_polar(double r1, double theta1, double r2, double theta2) {
+    return std::sqrt(r1*r1 + r2*r2 - 2*r1*r2*cos(theta1 - theta2));
+}
+
+double robot::interpolate(double x1, double x2,
+                          double t1, double t2, double t)
+{
+    if (t2 == t1)
+        return x1;
+
+    return x1 + (t - t1) * (x2 - x1) / (t2 - t1);
+}
+
+double robot::interpolateAngle(double a1, double a2, double t1, double t2, double t)
+{
+    double diff = a2 - a1;
+
+    while (diff > 180.0) diff -= 360.0;
+    while (diff < -180.0) diff += 360.0;
+
+    double ratio = (t - t1) / (t2 - t1);
+    return a1 + ratio * diff;
+}
+
+void robot::printToMap(Position pos)
+{
+    int sizePx = MAP_SIZE_METERS * PIXEL_PER_METER;
+
+    int px = pos.x * PIXEL_PER_METER;
+    int py = pos.y * PIXEL_PER_METER;
+
+    px += sizePx / 2;
+    py = sizePx / 2 - py;
+
+    if(px >= 0 && px < sizePx && py >= 0 && py < sizePx)
+    {
+        map[px][py] = 1;
+    }
+}
+
+void robot::createCostMap(int numOfPixels)
+{
+    for(int k = 1; k <= numOfPixels; k++){
+        for (int i = 0; i< MAP_SIZE_METERS*PIXEL_PER_METER;i++){
+            for (int j = 0; j< MAP_SIZE_METERS*PIXEL_PER_METER;j++){
+                Point p;
+                p.x = i;
+                p.y = j;
+                if(map[p.x][p.y] == k){
+                    std::vector<Point> fill = findElementAroundPoint(p,0);
+                    for(int l =0; l < fill.size(); l++){
+                        map[fill.at(l).x][fill.at(l).y]=k+1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+bool robot::createPath(Point p)
+{
+    map[p.x][p.y] = -1;
+    std::vector<Point> f = findLowerThenElementAroundPoint(p,1);
+    std::vector<Point> sus;
+    sus.reserve(8);
+    QQueue<Point> storage;
+
+    int k = -2;
+    while(!f.empty()){
+        for (int i = 0; i < f.size();i++){
+            sus = findElementAroundPointCross(f.at(i),0);
+
+            for (int j = 0; j < sus.size(); j++){
+                map[sus.at(j).x][sus.at(j).y] = k;
+                storage.push_back(sus.at(j));
+            }
+        }
+        f.clear();
+        if(storage.empty()){
+            break;
+        }
+        for(auto i : storage){
+            f.push_back(i);
+        }
+        storage.clear();
+        k--;
+    }
+
+
+    Point robotPosition = xyToMapTransform(pastPositions.back().pos);
+
+    if(map[robotPosition.x][robotPosition.y] <= k){
+        return false;
+    }else{
+        return true;
+    }
+
+}
+
+void robot::clear_path()
+{
+    for (int i = 0; i< MAP_SIZE_METERS*PIXEL_PER_METER;i++){
+        for (int j = 0; j< MAP_SIZE_METERS*PIXEL_PER_METER;j++){
+            if (map[i][j] != 1){
+                map[i][j] = 0;
+            }
+        }
+    }
+}
+
+QQueue<Position> robot::getPathKeyPositions()
+{
+    QQueue<Position> keyPoints;
+    std::vector<Point> sus;
+    sus.reserve(8);
+    Point start = xyToMapTransform(pastPositions.back().pos);
+    Point point = start;
+    Point last;
+    int lastDirection = 0;
+
+    while(1){
+        last = point;
+        sus = findElementAroundPoint(point, map[point.x][point.y]+1);
+        if(sus.empty()){
+            keyPoints.push_back(mapToXYTransform(last));
+            break;
+        }
+        point = sus.front();
+        int dir = findDirection(last,point);
+        if(dir != lastDirection){
+            lastDirection = dir;
+            keyPoints.push_back(mapToXYTransform(point));
+        }
+    }
+    return keyPoints;
+}
+
+std::vector<Point> robot::findElementAroundPoint(Point p, int element)
+{
+    std::vector<Point> result;
+
+    for (int dx = -1; dx <= 1; dx++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            int nx = p.x + dx;
+            int ny = p.y + dy;
+
+            if (nx >= 0 && nx < MAP_SIZE_METERS*PIXEL_PER_METER && ny >= 0 && ny < MAP_SIZE_METERS*PIXEL_PER_METER)
+            {
+                if (map[nx][ny] == element)
+                {
+                    result.push_back({nx, ny});
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+std::vector<Point> robot::findElementAroundPointCross(Point p, int element)
+{
+    std::vector<Point> result;
+
+    for (int dx = -1; dx <= 1; dx++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            if(dx == 0 | dy == 0){
+                int nx = p.x + dx;
+                int ny = p.y + dy;
+
+                if (nx >= 0 && nx < MAP_SIZE_METERS*PIXEL_PER_METER && ny >= 0 && ny < MAP_SIZE_METERS*PIXEL_PER_METER)
+                {
+                    if (map[nx][ny] == element)
+                    {
+                        result.push_back({nx, ny});
+                    }
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+std::vector<Point> robot::findLowerThenElementAroundPoint(Point p, int element)
+{
+    std::vector<Point> result;
+
+    for (int dx = -1; dx <= 1; dx++)
+    {
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            int nx = p.x + dx;
+            int ny = p.y + dy;
+
+            if (nx >= 0 && nx < MAP_SIZE_METERS*PIXEL_PER_METER && ny >= 0 && ny < MAP_SIZE_METERS*PIXEL_PER_METER)
+            {
+                if (map[nx][ny] < element)
+                {
+                    result.push_back({nx, ny});
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+int robot::findDirection(Point last, Point point)
+{
+    int dx = point.x - last.x;
+    int dy = point.y - last.y;
+
+    if (dx == 0 && dy == 0) return 0;
+
+    if (dx > 0 && dy > 0) return 1; // top-right
+    if (dx == 0 && dy > 0) return 2; // top
+    if (dx < 0 && dy > 0) return 3; // top-left
+    if (dx < 0 && dy == 0) return 4; // left
+    if (dx < 0 && dy < 0) return 5; // bottom-left
+    if (dx == 0 && dy < 0) return 6; // bottom
+    if (dx > 0 && dy < 0) return 7; // bottom-right
+    if (dx > 0 && dy == 0) return 8; // right
+
+    return -1;
+}
+
+int robot::sign(double x)
+{
+    if(x > 0){
+        return 1;
+    }
+    else if(x < 0){
+        return -1;
+    }
+    else{
+        return 0;
+    }
+}
+
+Point robot::xyToMapTransform(Position pos)
+{
+    Point p;
+    p.x = pos.x * PIXEL_PER_METER;
+    p.y = pos.y * PIXEL_PER_METER;
+
+    p.x += MAP_SIZE_METERS * PIXEL_PER_METER / 2;
+    p.y = MAP_SIZE_METERS * PIXEL_PER_METER / 2 - p.y;
+
+    return p;
+}
+
+Position robot::mapToXYTransform(Point p)
+{
+    Position pos;
+
+    double centeredX = p.x - MAP_SIZE_METERS * PIXEL_PER_METER / 2;
+    double centeredY = MAP_SIZE_METERS * PIXEL_PER_METER / 2 - p.y;
+
+    pos.x = centeredX / PIXEL_PER_METER;
+    pos.y = centeredY / PIXEL_PER_METER;
+
+    return pos;
+}
+
 double robot::calculateDistanceError(Position setPoint, double x, double y){
     return std::sqrt(std::pow(setPoint.x - x,2)+std::pow(setPoint.y-y,2));
+}
+
+double robot::normalizeAngleDeg(double angle)
+{
+    while (angle > 180.0) angle -= 360.0;
+    while (angle < -180.0) angle += 360.0;
+    return angle;
 }
 
 double robot::calculateAngleError(Position setPoint, double x, double y, double fi) {
@@ -251,7 +679,7 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     {
         Position target = position_list.front();
 
-        double goalDirection = getGoalDirectionRelative(target, x, y, fi);
+        double goalDirection = robot::calculateAngleError(target, pastPositions.back().pos.x, pastPositions.back().pos.y, pastPositions.back().angle);
         if (goalDirection < 0.0) goalDirection += 360.0;
 
         double currentDirection = 0.0; // rovno pred robot
@@ -270,26 +698,32 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
 
 
 
+    newLidarData = true;
     //tu mozete robit s datami z lidaru.. napriklad najst prekazky, zapisat do mapy. naplanovat ako sa prekazke vyhnut.
     // ale nic vypoctovo narocne - to iste vlakno ktore cita data z lidaru
    // updateLaserPicture=1;
     emit publishLidar(copyOfLaserData);
-   // update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
+   //update();//tento prikaz prinuti prekreslit obrazovku.. zavola sa paintEvent funkcia
 
     return 0;
 }
 
-double robot::ramp(double target, double dt, double speed){
+double robot::ramp(double target, double d, double y){
 
-    if(target-0.1 > speed){
-        speed += dt;
+    if(target-0.1 > y){
+        y += d;
+    }
+    else if(target+0.1 < y){
+        y -= d;
     }
     else{
-        speed = target;
+        y = target;
     }
 
-    return speed;
+    return y;
 }
+
+
 
 double robot::getDistanceFromWhells(double leftWheel, double rightWheel)
 {
@@ -312,18 +746,65 @@ double robot::realDistanceTraveled(unsigned short encoderValue, unsigned short *
     return (double)diff*TICK_TO_METER;
 }
 
-double robot::normalizeAngleDeg(double angle)
+std::vector<double> robot::getCandidates(std::vector<int> binHistogram,int sectors)
 {
-    while (angle > 180.0) angle -= 360.0;
-    while (angle < -180.0) angle += 360.0;
-    return angle;
+    std::vector<double> candidates;
+    double candidate;
+    double sectorWidth = 360.0 / sectors;
+    std::vector<FreeInterval> intervals = getFreeIntervals(binHistogram,sectors);
+    int width;
+    for(auto i:intervals){
+        width = getIntervalWidth(i,sectors);
+        if(width < 5){
+            candidate = sectorWidth * width / 2 + sectorWidth * i.start;
+            if(candidate >= 360) candidate -= 360;
+            candidates.push_back(candidate);
+        }else{
+            candidate = i.start * sectorWidth + sectorWidth;
+            while(candidate >= 360.0) candidate -= 360.0;
+            while(candidate < 0.0) candidate += 360.0;
+            candidates.push_back(candidate);
+            candidate = i.end * sectorWidth - sectorWidth;
+            while(candidate >= 360.0) candidate -= 360.0;
+            while(candidate < 0.0) candidate += 360.0;
+            candidates.push_back(candidate);
+        }
+    }
+    return candidates;
 }
 
-double robot::getGoalDirectionRelative(Position target, double x, double y, double fi)
-{
-    double desiredGlobal = std::atan2(target.y - y, target.x - x) * 180.0 / M_PI;
-    return normalizeAngleDeg(desiredGlobal - fi);
+void robot::addGoalCandidate(std::vector<double>& candidates, std::vector<int>& maskedHistogram, int sectors, double sectorWidth){
+    if (!position_list.empty())
+    {
+        Position target = position_list.front();
+
+        double goalCandidate = robot::calculateAngleError(target, pastPositions.back().pos.x, pastPositions.back().pos.y, pastPositions.back().angle);
+
+        if (goalCandidate < 0.0)
+            goalCandidate += 360.0;
+
+        int goalSector = int(goalCandidate / sectorWidth);
+        if (goalSector >= sectors) goalSector = sectors - 1;
+
+        if (maskedHistogram[goalSector] == 0)
+        {
+            bool alreadyThere = false;
+
+            for (double c : candidates)
+            {
+                if (std::abs(c - goalCandidate) < 0.001)
+                {
+                    alreadyThere = true;
+                    break;
+                }
+            }
+
+            if (!alreadyThere)
+                candidates.push_back(goalCandidate);
+        }
+    }
 }
+
 std::vector<double> robot::getHistogram(const std::vector<LaserData>& laserData,int sectors, double sectorWidth){
 
     std::vector<double> histogram(sectors,0.0);
@@ -335,7 +816,7 @@ std::vector<double> robot::getHistogram(const std::vector<LaserData>& laserData,
 
     int CurSector = 0;
 
-    double safeRadius = 150.0 + 80.0;
+    double safeRadius = 150.0 + 50.0;
 
     for (auto &p : laserData)
     {
@@ -410,53 +891,13 @@ std::vector<double> robot::getHistogram(const std::vector<LaserData>& laserData,
 
 void robot::updateBinHistogram(std::vector<int>& binHistogram,std::vector<double>& histogram,int sectors){
     //zohladni zmenu natocenia aby krajova oblast nebola zle shiftnuta
-    int upperLimit = 50;
-    int lowerLimit = 30;
+    int upperLimit = 90;
+    int lowerLimit = 70;
     for (int i = 0; i < sectors; i++)
     {
         if(histogram[i] >= upperLimit) binHistogram[i] = 1;
         else if(histogram[i] <= lowerLimit) binHistogram[i] = 0;
     }
-}
-
-std::vector<FreeInterval> robot::getFreeIntervals(const std::vector<int>& binHistogram,int sectors)
-{
-    bool inInterval = false;
-    std::vector<FreeInterval> intervals;
-    FreeInterval p;
-    for(int h = 0; h < binHistogram.size();h++)
-    {
-        if(binHistogram[h] == 0 && inInterval == false)
-        {
-            p.start = h;
-            inInterval = true;
-        }
-        else if(binHistogram[h] == 1 && inInterval == true){
-            p.end = h - 1;
-            inInterval = false;
-            intervals.push_back(p);
-        }
-    }
-    if(inInterval){
-        p.end = sectors - 1;
-        intervals.push_back(p);
-    }
-    if(intervals.size() > 1 && intervals.front().start == 0 && intervals.back().end == sectors - 1){
-        p.start = intervals.back().start;
-        p.end = intervals.front().end;
-        intervals.erase(intervals.begin());
-        intervals.pop_back();
-        intervals.push_back(p);
-    }
-    return intervals;
-}
-
-int robot::getIntervalWidth(const FreeInterval& interval, int sectors)
-{
-    if (interval.end >= interval.start)
-        return interval.end - interval.start + 1;
-    else
-        return (sectors - interval.start) + (interval.end + 1);
 }
 
 std::vector<int> robot::applyMask(const std::vector<int>& binHistogram,
@@ -549,66 +990,45 @@ std::vector<int> robot::applyMask(const std::vector<int>& binHistogram,
     return maskedHistogram;
 }
 
-std::vector<double> robot::getCandidates(std::vector<int> binHistogram,int sectors)
+std::vector<FreeInterval> robot::getFreeIntervals(const std::vector<int>& binHistogram,int sectors)
 {
-    std::vector<double> candidates;
-    double candidate;
-    double sectorWidth = 360.0 / sectors;
-    std::vector<FreeInterval> intervals = getFreeIntervals(binHistogram,sectors);
-    int width;
-    for(auto i:intervals){
-        width = getIntervalWidth(i,sectors);
-        if(width < 5){
-            candidate = sectorWidth * width / 2 + sectorWidth * i.start;
-            if(candidate >= 360) candidate -= 360;
-            candidates.push_back(candidate);
-        }else{
-            candidate = i.start * sectorWidth + sectorWidth;
-            while(candidate >= 360.0) candidate -= 360.0;
-            while(candidate < 0.0) candidate += 360.0;
-            candidates.push_back(candidate);
-            candidate = i.end * sectorWidth - sectorWidth;
-            while(candidate >= 360.0) candidate -= 360.0;
-            while(candidate < 0.0) candidate += 360.0;
-            candidates.push_back(candidate);
-        }
-    }
-    return candidates;
-}
-
-void robot::addGoalCandidate(std::vector<double>& candidates, std::vector<int>& maskedHistogram, int sectors, double sectorWidth){
-    if (!position_list.empty())
+    bool inInterval = false;
+    std::vector<FreeInterval> intervals;
+    FreeInterval p;
+    for(int h = 0; h < binHistogram.size();h++)
     {
-        Position target = position_list.front();
-
-        double goalCandidate = getGoalDirectionRelative(target, x, y, fi); // <- v rozsahu <-180,180>
-
-        if (goalCandidate < 0.0)
-            goalCandidate += 360.0; // <- teraz 0..360
-
-        int goalSector = int(goalCandidate / sectorWidth);
-        if (goalSector >= sectors) goalSector = sectors - 1;
-
-        if (maskedHistogram[goalSector] == 0)
+        if(binHistogram[h] == 0 && inInterval == false)
         {
-            bool alreadyThere = false;
-
-            for (double c : candidates)
-            {
-                if (std::abs(c - goalCandidate) < 0.001)
-                {
-                    alreadyThere = true;
-                    break;
-                }
-            }
-
-            if (!alreadyThere)
-                candidates.push_back(goalCandidate);
+            p.start = h;
+            inInterval = true;
+        }
+        else if(binHistogram[h] == 1 && inInterval == true){
+            p.end = h - 1;
+            inInterval = false;
+            intervals.push_back(p);
         }
     }
+    if(inInterval){
+        p.end = sectors - 1;
+        intervals.push_back(p);
+    }
+    if(intervals.size() > 1 && intervals.front().start == 0 && intervals.back().end == sectors - 1){
+        p.start = intervals.back().start;
+        p.end = intervals.front().end;
+        intervals.erase(intervals.begin());
+        intervals.pop_back();
+        intervals.push_back(p);
+    }
+    return intervals;
 }
 
-
+int robot::getIntervalWidth(const FreeInterval& interval, int sectors)
+{
+    if (interval.end >= interval.start)
+        return interval.end - interval.start + 1;
+    else
+        return (sectors - interval.start) + (interval.end + 1);
+}
 
 double robot::angleDiffDeg(double a, double b)
 {
@@ -625,7 +1045,7 @@ double robot::selectBestCandidate(const std::vector<double>& candidates,
     if (candidates.empty())
         return currentDirection;
 
-    double wg = 1.2;   // ciel
+    double wg = 2.0;   // ciel
     double wc = 1.0;   // aktualny smer
     double wp = 0.8;   // predchadzajuci vyber
 
@@ -650,7 +1070,6 @@ double robot::selectBestCandidate(const std::vector<double>& candidates,
 
     return bestCandidate;
 }
-
 
   #ifndef DISABLE_OPENCV
 ///toto je calback na data z kamery, ktory ste podhodili robotu vo funkcii initAndStartRobot

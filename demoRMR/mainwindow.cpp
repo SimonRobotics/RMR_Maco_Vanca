@@ -17,10 +17,17 @@ MainWindow::MainWindow(QWidget *parent) :
 {
 
     //tu je napevno nastavena ip. treba zmenit na to co ste si zadali do text boxu alebo nejaku inu pevnu. co bude spravna
-    // ipaddress="192.168.1.15";//192.168.1.15toto je na niektory realny robot.. na lokal budete davat "127.0.0.1"
-    ipaddress="127.0.0.1";
-
+    ipaddress="127.0.0.1";//192.168.1.11toto je na niektory realny robot.. na lokal budete davat "127.0.0.1"
+    //ipaddress="192.168.1.15";
     ui->setupUi(this);
+
+    mapSizeMeters = 14;
+    pixelsPerMeter = 20;
+
+    int sizePx = mapSizeMeters * pixelsPerMeter;
+    mapPixmap = QPixmap(sizePx, sizePx);
+    mapPixmap.fill(Qt::black);
+
     datacounter=0;
 #ifndef DISABLE_OPENCV
     actIndex=-1;
@@ -53,6 +60,11 @@ void MainWindow::paintEvent(QPaintEvent *event)
     rect= ui->widget->geometry();//ziskate porametre stvorca,do ktoreho chcete kreslit
     rect.translate(0,15);
     painter.drawRect(rect);
+
+    rect2 = ui->widget_2->geometry();
+    rect2.translate(0,15);
+
+    painter.drawPixmap(rect2, mapPixmap);
 #ifndef DISABLE_OPENCV
     if(useCamera1==true && actIndex>-1)/// ak zobrazujem data z kamery a aspon niektory frame vo vectore je naplneny
     {
@@ -101,6 +113,16 @@ void MainWindow::paintEvent(QPaintEvent *event)
 #endif
 }
 
+void MainWindow::paintPoints(std::vector<Point> points, QColor color)
+{
+    QPainter painter(&mapPixmap);
+    painter.setPen(color);
+
+    for(int i = 0; i < points.size();i++){
+        painter.drawPoint(points.at(i).x, points.at(i).y);
+    }
+}
+
 
 /// toto je slot. niekde v kode existuje signal, ktory je prepojeny. pouziva sa napriklad (v tomto pripade) ak chcete dostat data z jedneho vlakna (robot) do ineho (ui)
 /// prepojenie signal slot je vo funkcii  on_pushButton_9_clicked
@@ -111,7 +133,6 @@ void  MainWindow::setUiValues(double robotX,double robotY,double robotFi)
     ui->lineEdit_4->setText(QString::number(robotFi));
 }
 
-
 void MainWindow::on_pushButton_9_clicked() //start button
 {
     //ziskanie joystickov
@@ -119,10 +140,14 @@ void MainWindow::on_pushButton_9_clicked() //start button
 
     //tu sa nastartuju vlakna ktore citaju data z lidaru a robota
 
+    connect(&_robot,SIGNAL(publishMap(std::vector<Point>)),this,SLOT(paintMap(std::vector<Point>)));
 
+    connect(&_robot,SIGNAL(publishWaypoints(QQueue<Position>)),this,SLOT(paintWaypoints(QQueue<Position>)));
+    connect(&_robot,SIGNAL(resetMap()),this,SLOT(repaintMap()));
 
     connect(&_robot,SIGNAL(publishPosition(double,double,double)),this,SLOT(setUiValues(double,double,double)));
     connect(&_robot,SIGNAL(publishLidar(const std::vector<LaserData> &)),this,SLOT(paintThisLidar(const std::vector<LaserData> &)));
+    connect(ui->comboBox, SIGNAL(currentIndexChanged(int)),this, SLOT(indexChanged(int)));
 #ifndef DISABLE_OPENCV
     connect(&_robot,SIGNAL(publishCamera(const cv::Mat &)),this,SLOT(paintThisCamera(const cv::Mat &)));
 #endif
@@ -176,11 +201,29 @@ void MainWindow::on_pushButton_5_clicked()//right
 void MainWindow::on_pushButton_4_clicked() //stop
 {
     _robot.setSpeed(0,0);
-
 }
 
+void MainWindow::indexChanged(int index)
+{
+    _robot.setState(index);
+}
 
+void MainWindow::mousePressEvent(QMouseEvent *event)
+{
+    if (!rect2.contains(event->pos()))
+        return;
 
+    const int mapPixelSize = mapSizeMeters * pixelsPerMeter;
+
+    const QPoint local = event->pos() - rect2.topLeft();
+
+    double mapX = (mapPixelSize / 2.0 - local.x() * mapPixelSize / rect2.width()) / pixelsPerMeter;
+    double mapY = (mapPixelSize / 2.0 - local.y() * mapPixelSize / rect2.height()) / pixelsPerMeter;
+
+    mapX = -mapX;
+
+    _robot.addWaypoint(mapX, mapY);
+}
 
 void MainWindow::on_pushButton_clicked()
 {
@@ -212,6 +255,41 @@ int MainWindow::paintThisLidar(const std::vector<LaserData> &laserData)
 
     update();
     return 0;
+}
+
+void MainWindow::paintWaypoints(QQueue<Position> waypointList)
+{
+    QPainter painter(&mapPixmap);
+    painter.setPen(Qt::yellow);
+
+    int sizePx = mapSizeMeters * pixelsPerMeter;
+
+    while(!waypointList.empty()){
+
+        int px = waypointList.front().x * pixelsPerMeter;
+        int py = waypointList.front().y * pixelsPerMeter;
+
+        px += sizePx / 2;
+        py = sizePx / 2 - py;
+
+        if(px >= 0 && px < sizePx && py >= 0 && py < sizePx)
+        {
+            painter.drawEllipse(px, py, 1, 1);
+        }
+        waypointList.pop_front();
+    }
+}
+
+void MainWindow::repaintMap()
+{
+    mapPixmap.fill(Qt::black);
+    paintMap(_robot.getMap());
+    paintPoints(_robot.getCostMap(),Qt::gray);
+}
+
+void MainWindow::paintMap(std::vector<Point> mapList)
+{
+    paintPoints(mapList, Qt::white);
 }
 
 #ifndef DISABLE_OPENCV
