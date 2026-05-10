@@ -102,6 +102,39 @@ std::vector<Point> robot::getCostMap()
     return mm;
 }
 
+void robot::loadMap(QString fileName)
+{
+    QFile file(fileName);
+
+    if (!file.open(QIODevice::ReadOnly))
+        return; // handle error properly
+
+    file.read(reinterpret_cast<char*>(map), sizeof(map));
+
+    file.close();
+
+    emit resetMap();
+
+}
+
+void robot::saveMap()
+{
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
+
+    QString fileName = "map_" + timestamp + ".bin";
+
+    QSaveFile file(fileName);
+
+    if (!file.open(QIODevice::WriteOnly))
+        return;
+
+    file.write(reinterpret_cast<char*>(map), sizeof(map));
+
+    if (!file.commit()) {
+        return;
+    }
+}
+
 void robot::setSpeed(double forw, double rots)
 {
     if(forw==0 && rots!=0)
@@ -278,7 +311,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     }
     if(state == 2){
         if(createCostmap){
-            createCostMap(9);
+            createCostMap(5);
             createCostmap = false;
         }
         if(navigation && !position_list.empty()){

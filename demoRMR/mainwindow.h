@@ -6,6 +6,7 @@
 #include <QDebug>
 #include <QQueue>
 #include <iostream>
+#include <QFileDialog>
 // #include<arpa/inet.h>
 // #include<unistd.h>
 // #include<sys/socket.h>
@@ -14,6 +15,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <vector>
+
 
 // #include "ckobuki.h"
 // #include "rplidar.h"
@@ -60,6 +62,10 @@ private slots:
   void on_pushButton_4_clicked();
 
   void on_pushButton_clicked();
+
+  void on_pushButton_17_clicked();
+
+  void on_pushButton_18_clicked();
 
   void indexChanged(int index);
 
