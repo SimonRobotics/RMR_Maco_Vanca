@@ -5,6 +5,7 @@
 #include <QMouseEvent>
 #include <QDebug>
 #include <QQueue>
+#include <QFileDialog>
 #include <iostream>
 // #include<arpa/inet.h>
 // #include<unistd.h>
@@ -58,6 +59,10 @@ private slots:
   void on_pushButton_5_clicked();
 
   void on_pushButton_4_clicked();
+
+  void on_pushButton_17_clicked();
+
+  void on_pushButton_18_clicked();
 
   void on_pushButton_clicked();
 

@@ -5,6 +5,9 @@
 #include <QWidget>
 #include <QQueue>
 #include <QDebug>
+#include <QSaveFile>
+#include <QDateTime>
+#include <QFile>
 
 
 #ifndef DISABLE_OPENCV
@@ -70,7 +73,8 @@ public:
   void addWaypoint(double x, double y);
   std::vector<Point> getMap();
   std::vector<Point> getCostMap();
-
+  void loadMap(QString fileName);
+  void saveMap();
 signals:
   void publishPosition(double x, double y, double z);
   void publishMap(std::vector<Point> pointList);

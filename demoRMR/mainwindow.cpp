@@ -203,6 +203,28 @@ void MainWindow::on_pushButton_4_clicked() //stop
     _robot.setSpeed(0,0);
 }
 
+void MainWindow::on_pushButton_17_clicked()
+{
+    QString fileName = QFileDialog::getOpenFileName(
+        nullptr,
+        "Open Map",
+        "",
+        "Binary Files (*.bin);;All Files (*)"
+        );
+
+    if (fileName.isEmpty())
+        return;
+
+    _robot.loadMap(fileName);
+}
+
+void MainWindow::on_pushButton_18_clicked()
+{
+    _robot.saveMap();
+}
+
+
+
 void MainWindow::indexChanged(int index)
 {
     _robot.setState(index);
