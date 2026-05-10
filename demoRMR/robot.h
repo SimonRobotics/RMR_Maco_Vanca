@@ -52,6 +52,14 @@ struct FreeInterval
     int end;
 };
 
+struct PotentialPosition{
+    int x;
+    int y;
+    double phi;
+    double weight;
+};
+
+
 class robot : public QObject {
   Q_OBJECT
 public:
@@ -86,7 +94,8 @@ signals:
 #endif
 private:
   /// toto su vase premenne na vasu odometriu
-
+    void generatePotentialPositions(std::vector<PotentialPosition>& potentialPositions, int mapWidth, int mapHeight, int numOfPositions);
+    void updateWeights(std::vector<PotentialPosition>& potentialPositions, const std::vector<LaserData>& laserData);
   bool initParam;
   bool newLidarData;
   bool createCostmap;
@@ -110,6 +119,7 @@ private:
   /// processThisRobot
   double forwardspeed;  // mm/s
   double rotationspeed; // omega/s
+  std::vector<PotentialPosition> potentialPositions;
 
   /// toto su callbacky co sa sa volaju s novymi datami
   int processThisLidar(const std::vector<LaserData> &laserData);
@@ -137,8 +147,8 @@ private:
   Position mapToXYTransform(Point p);
   std::vector<double> getCandidates(std::vector<int> binHistogram,int sectors);
   void addGoalCandidate(std::vector<double>& candidates, std::vector<int>& maskedHistogram, int sectors, double sectorWidth);
-  std::vector<double> getHistogram(const std::vector<LaserData>& laserData,int sectors, double sectorWidth);
-  void updateBinHistogram(std::vector<int>& binHistogram,std::vector<double>& histogram,int sectors);
+  std::vector<double> getHistogram(const std::vector<LaserData>& laserData,int sectors, double sectorWidth,bool nearGoal,double distanceToGoal);
+  void updateBinHistogram(std::vector<int>& binHistogram,std::vector<double>& histogram,int sectors, double sectorwidth);
   std::vector<int> applyMask(const std::vector<int>& binHistogram, const std::vector<LaserData>& laserData, int sectors);
   std::vector<FreeInterval> getFreeIntervals(const std::vector<int>& binHistogram,int sectors);
   int getIntervalWidth(const FreeInterval& interval, int sectors);

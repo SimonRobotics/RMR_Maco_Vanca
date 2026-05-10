@@ -152,6 +152,8 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         pastPositions.push_back(startTimePosition);
         pastPositions.push_back(startTimePosition);
 
+        // generatePotentialPositions(potentialPositions, 1000, 500, 700);
+
         robot::initParam = true;
     }
 
@@ -194,7 +196,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
             if (std::abs(ang_e) < 5){
                 rotationspeed = 0;
             }
-            else if (std::abs(ang_e) > 90){
+            else if (std::abs(ang_e) > 45){
                 forwardspeed = 0;
                 if(std::abs(ang_e*0.05*MAX_SPEED_ANG) > MAX_SPEED_ANG){
                     rotationspeed =robot::ramp(sign(ang_e)*MAX_SPEED_ANG, 0.05,rotationspeed);
@@ -278,7 +280,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     }
     if(state == 2){
         if(createCostmap){
-            createCostMap(9);
+            createCostMap(5);
             createCostmap = false;
         }
         if(navigation && !position_list.empty()){
@@ -646,11 +648,26 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
     int sectors = binHistogram.size();
     double sectorWidth = 360.0 / sectors;
 
-    std::vector<double> histogram = getHistogram(laserData,sectors,sectorWidth);
+    bool nearGoal = false;
+    double distanceToGoal = 999999.0;
 
-    updateBinHistogram(binHistogram,histogram,sectors);
+    if (!position_list.empty() && !pastPositions.empty())
+    {
+        Position target = position_list.front();
+
+        double dx = target.x - pastPositions.back().pos.x;
+        double dy = target.y - pastPositions.back().pos.y;
+
+        distanceToGoal = std::sqrt(dx * dx + dy * dy);
+        nearGoal = distanceToGoal < 100.0;
+    }
+
+    std::vector<double> histogram = getHistogram(laserData,sectors,sectorWidth,nearGoal,distanceToGoal);
+
+    updateBinHistogram(binHistogram,histogram,sectors,sectorWidth);
 
     std::vector<int> maskedHistogram = applyMask(binHistogram, laserData, sectors);
+
 
     // std::cout << "BIN: ";
     // for (int i = 0; i < sectors; i++)
@@ -805,7 +822,7 @@ void robot::addGoalCandidate(std::vector<double>& candidates, std::vector<int>& 
     }
 }
 
-std::vector<double> robot::getHistogram(const std::vector<LaserData>& laserData,int sectors, double sectorWidth){
+std::vector<double> robot::getHistogram(const std::vector<LaserData>& laserData,int sectors, double sectorWidth, bool nearGoal, double distanceToGoal){
 
     std::vector<double> histogram(sectors,0.0);
 
@@ -816,7 +833,7 @@ std::vector<double> robot::getHistogram(const std::vector<LaserData>& laserData,
 
     int CurSector = 0;
 
-    double safeRadius = 150.0 + 50.0;
+    double safeRadius = 150.0 + 80.0;
 
     for (auto &p : laserData)
     {
@@ -826,6 +843,8 @@ std::vector<double> robot::getHistogram(const std::vector<LaserData>& laserData,
         double dist  = p.scanDistance; // mm
 
         if (dist <= 0.0) continue;
+        // if (nearGoal && dist > distanceToGoal + 50.0)
+        //     continue;
 
         //std::cout << "Uhol: " << angle << " Vzdialenost: " << dist << std::endl;
 
@@ -889,14 +908,58 @@ std::vector<double> robot::getHistogram(const std::vector<LaserData>& laserData,
     return histogram;
 }
 
-void robot::updateBinHistogram(std::vector<int>& binHistogram,std::vector<double>& histogram,int sectors){
+void robot::updateBinHistogram(std::vector<int>& binHistogram,std::vector<double>& histogram,int sectors, double sectorWidth){
     //zohladni zmenu natocenia aby krajova oblast nebola zle shiftnuta
-    int upperLimit = 90;
-    int lowerLimit = 70;
+    int upperLimit = 50;//90 - 50
+    int lowerLimit = 30;//70 - 30
+
+    double angleDiff = 0.0;
+
+    if (pastPositions.size() >= 2)
+    {
+        double currentAngle = pastPositions.back().angle;
+        double previousAngle = pastPositions[pastPositions.size() - 2].angle;
+
+        angleDiff = currentAngle - previousAngle;
+
+        while (angleDiff > 180.0) angleDiff -= 360.0;
+        while (angleDiff < -180.0) angleDiff += 360.0;
+
+        // std::cout << "Zmena uhla: " << angleDiff << std::endl;
+    }
+
+    int histBinShift = static_cast<int>(std::round(angleDiff / sectorWidth));
+
+    if (std::abs(histBinShift) > 0)
+    {
+        int j = histBinShift;
+
+        std::vector<int> shiftedBinHistogram;
+        shiftedBinHistogram.assign(sectors, 0);
+
+        for (int i = 0; i < sectors; i++)
+        {
+            if (j < 0) j += sectors;
+            if (j >= sectors) j -= sectors;
+
+            shiftedBinHistogram[i] = binHistogram[j];
+
+            j++;
+        }
+
+        binHistogram = shiftedBinHistogram;
+    }
+
     for (int i = 0; i < sectors; i++)
     {
-        if(histogram[i] >= upperLimit) binHistogram[i] = 1;
-        else if(histogram[i] <= lowerLimit) binHistogram[i] = 0;
+        if (histogram[i] >= upperLimit)
+        {
+            binHistogram[i] = 1;
+        }
+        else if (histogram[i] <= lowerLimit)
+        {
+            binHistogram[i] = 0;
+        }
     }
 }
 
@@ -941,22 +1004,20 @@ std::vector<int> robot::applyMask(const std::vector<int>& binHistogram,
 
             if (err <= forbiddenBand)
             {
-                int extra = 1;
-
-                if (err < forbiddenBand * 0.66) extra = 2;
-                if (err < forbiddenBand * 0.33) extra = 3;
-
-                for (int k = 0; k <= extra; k++)
+                for (int k = 0; k < sectors; k++)
                 {
                     int s = obstacleSector + k;
                     while (s >= sectors) s -= sectors;
 
                     double centerAngle = s * sectorWidth + sectorWidth / 2.0;
                     double relAngle = centerAngle;
-                    if (relAngle > 180.0) relAngle -= 360.0;
+                    if (relAngle > 180.0)
+                        relAngle -= 360.0;
 
-                    if (relAngle > 0.0)
-                        maskedHistogram[s] = 1;
+                    if (relAngle <= 0.0)
+                        break;
+
+                    maskedHistogram[s] = 1;
                 }
             }
         }
@@ -967,22 +1028,20 @@ std::vector<int> robot::applyMask(const std::vector<int>& binHistogram,
 
             if (err <= forbiddenBand)
             {
-                int extra = 1;
-
-                if (err < forbiddenBand * 0.66) extra = 2;
-                if (err < forbiddenBand * 0.33) extra = 3;
-
-                for (int k = 0; k <= extra; k++)
+                for (int k = 0; k < sectors; k++)
                 {
                     int s = obstacleSector - k;
                     while (s < 0) s += sectors;
 
                     double centerAngle = s * sectorWidth + sectorWidth / 2.0;
                     double relAngle = centerAngle;
-                    if (relAngle > 180.0) relAngle -= 360.0;
+                    if (relAngle > 180.0)
+                        relAngle -= 360.0;
 
-                    if (relAngle < 0.0)
-                        maskedHistogram[s] = 1;
+                    if (relAngle >= 0.0)
+                        break;
+
+                    maskedHistogram[s] = 1;
                 }
             }
         }
@@ -1059,7 +1118,7 @@ double robot::selectBestCandidate(const std::vector<double>& candidates,
             wc * angleDiffDeg(c, currentDirection) +
             wp * angleDiffDeg(c, previousDirection);
 
-        std::cout << "cost = "<< wg * angleDiffDeg(c, goalDirection) <<" + " << wc * angleDiffDeg(c, currentDirection)<<" + "<< wp * angleDiffDeg(c, previousDirection) <<" = " << cost <<std::endl;
+        // std::cout << "cost = "<< wg * angleDiffDeg(c, goalDirection) <<" + " << wc * angleDiffDeg(c, currentDirection)<<" + "<< wp * angleDiffDeg(c, previousDirection) <<" = " << cost <<std::endl;
 
         if (cost < bestCost)
         {
@@ -1070,6 +1129,41 @@ double robot::selectBestCandidate(const std::vector<double>& candidates,
 
     return bestCandidate;
 }
+
+void robot::generatePotentialPositions(std::vector<PotentialPosition>& potentialPositions, int mapWidth, int mapHeight, int numOfPositions){
+    for(int i = 0; i < numOfPositions; i++){
+
+        PotentialPosition pos;
+        do{
+        pos.x = rand() % (mapWidth + 1);
+        pos.y = rand() % (mapHeight + 1);
+        }while(map [pos.x][pos.y] != 1);
+        pos.phi = rand() % (361) - 180; // -180 - 180
+        pos.weight = 1.0 / numOfPositions;
+        potentialPositions.push_back(pos);
+    }
+
+    // int j = 0;
+    // for (auto i: potentialPositions) {
+    //     std::cout << "Kandidat " << j++ << ": " << std::endl;
+    //     std::cout <<"Suradnica x =" << i.x << std::endl;
+    //     std::cout <<"Suradnica y =" << i.y << std::endl;
+    //     std::cout <<"Orientacia phi =" << i.phi << std::endl;
+    //     std::cout <<"Vaha =" << i.weight << std::endl;
+    // }
+
+}
+
+void robot::updateWeights(std::vector<PotentialPosition>& potentialPositions, const std::vector<LaserData>& laserData){
+    for(auto i : potentialPositions){
+        for(const auto p:laserData){
+
+        }
+    }
+}
+
+
+
 
   #ifndef DISABLE_OPENCV
 ///toto je calback na data z kamery, ktory ste podhodili robotu vo funkcii initAndStartRobot
