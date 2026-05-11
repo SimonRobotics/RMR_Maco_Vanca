@@ -8,7 +8,7 @@
 #include <QSaveFile>
 #include <QDateTime>
 #include <QFile>
-
+#include <algorithm>
 
 #ifndef DISABLE_OPENCV
 #include "opencv2/core/utility.hpp"
@@ -60,6 +60,8 @@ struct PotentialPosition{
     int y;
     double phi;
     double weight;
+    double error;
+    bool isDebug;
 };
 
 
@@ -69,6 +71,7 @@ public:
   explicit robot(QObject *parent = nullptr);
 
   void initAndStartRobot(std::string ipaddress);
+  void monteCarloTestStep(const std::vector<LaserData>& laserData);
 
   // tato funkcia len nastavuje hodnoty.. posielaju sa v callbacku(dobre, kvoli
   // asynchronnosti a zabezpeceniu,ze sa poslu len raz pri viacero prepisoch
@@ -99,8 +102,27 @@ signals:
 #endif
 private:
   /// toto su vase premenne na vasu odometriu
+    double lastRobotX = 0.0;
+    double lastRobotY = 0.0;
+    double lastRobotPhi = 0.0;
+    bool lastRobotPoseInitialized = false;
+  void addDebugParticle(int x, int y, double phi);
+    void printBestErrors(int count);
+    void drawParticlesToMap();
+    void clearParticleVisualization();
+    bool mclEnabled = false;
+    int mclCounter;
+    void moveParticlesByOdometry();
+    void startMonteCarlo();
+    double rayTraceBresenham(const PotentialPosition& pos, double laserAngleDeg);
+    double errorToWeight(double error);
+    double calculateParticleError(const PotentialPosition& pos, const std::vector<LaserData>& laserData);
     void generatePotentialPositions(std::vector<PotentialPosition>& potentialPositions, int mapWidth, int mapHeight, int numOfPositions);
     void updateWeights(std::vector<PotentialPosition>& potentialPositions, const std::vector<LaserData>& laserData);
+    void resampleParticles(std::vector<PotentialPosition>& potentialPositions);
+    void addNoiseToParticle(PotentialPosition& p);
+    bool isFreeCell(int x, int y);
+    PotentialPosition getBestParticle();
   bool initParam;
   bool newLidarData;
   bool createCostmap;
@@ -142,6 +164,9 @@ private:
   void createCostMap(int numOfPixels);
   bool createPath(Point p);
   void clear_path();
+  void fillOutsideMazeAsWalls();
+  bool isInsideMap(int x, int y);
+  void initMonteCarloLocalization();
   QQueue<Position> getPathKeyPositions();
   std::vector<Point> findElementAroundPointCross(Point p, int element);
   std::vector<Point> findElementAroundPoint(Point p, int element);
