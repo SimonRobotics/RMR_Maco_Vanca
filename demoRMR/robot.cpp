@@ -201,6 +201,8 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         // generatePotentialPositions(potentialPositions, 1000, 500, 700);
 
         robot::initParam = true;
+        // moveParticlesByOdometry();
+
     }
 
     TimePosition TimePosition;
@@ -1210,13 +1212,13 @@ void robot::generatePotentialPositions(std::vector<PotentialPosition>& potential
 
 double robot::rayTraceBresenham(const PotentialPosition& pos, double laserAngleDeg)
 {
-    //kokot
+
     int mapSize = MAP_SIZE_METERS * PIXEL_PER_METER;
 
     double globalAngleDeg = (pos.phi - 90) - laserAngleDeg;
     double angleRad = globalAngleDeg * M_PI / 180.0;
 
-    int maxDistancePx = 160; // napr. 6 metrov pri 20 px/m
+    int maxDistancePx = 240;
 
     int x0 = pos.x;
     int y0 = pos.y;
@@ -1224,16 +1226,11 @@ double robot::rayTraceBresenham(const PotentialPosition& pos, double laserAngleD
     int x1 = x0 + cos(angleRad) * maxDistancePx;
     int y1 = y0 - sin(angleRad) * maxDistancePx;
 
-    if (pos.x == 140 && pos.y == 140 && pos.phi == 90 &&
-        (laserAngleDeg == 0 || laserAngleDeg == 90 || laserAngleDeg == 180 || laserAngleDeg == 270))
-    {
-        std::cout << "RAY DEBUG "
-                  << "laserAngle=" << laserAngleDeg
-                  << " globalAngle=" << globalAngleDeg
-                  << " start=(" << x0 << "," << y0 << ")"
-                  << " end=(" << x1 << "," << y1 << ")"
-                  << std::endl;
-    }
+    // if (pos.x == 140 && pos.y == 140 && pos.phi == 90 &&
+    //     (laserAngleDeg == 0 || laserAngleDeg == 90 || laserAngleDeg == 180 || laserAngleDeg == 270))
+    // {
+    //     std::cout << "RAY DEBUG " << "laserAngle=" << laserAngleDeg << " globalAngle=" << globalAngleDeg << " start=(" << x0 << "," << y0 << ")" << " end=(" << x1 << "," << y1 << ")" << std::endl;
+    // }
 
     int dx = abs(x1 - x0);
     int dy = abs(y1 - y0);
@@ -1285,8 +1282,17 @@ double robot::calculateParticleError(const PotentialPosition& pos, const std::ve
     double error = 0.0;
     int usedRays = 0;
 
+
     for (int k = 0; k < laserData.size(); k += 5)
     {
+        double distMm = laserData[k].scanDistance;
+
+        if (distMm < 100)
+            continue;
+
+        if (distMm > 10000)
+            continue;
+
         double realDistancePx = laserData[k].scanDistance / 1000.0 * PIXEL_PER_METER;
 
         double simulatedDistancePx = rayTraceBresenham(pos, laserData[k].scanAngle);
@@ -1296,45 +1302,38 @@ double robot::calculateParticleError(const PotentialPosition& pos, const std::ve
         error += diff * diff;
         usedRays++;
 
-        // DEBUG: vypis iba pre predpokladanu skutocnu polohu robota
-        if (pos.x == 140 && pos.y == 140 && pos.phi == 90)
-        {
-            static int debugRayCounter = 0;
+        // // DEBUG: vypis iba pre predpokladanu skutocnu polohu robota
+        // if (pos.x == 140 && pos.y == 140 && pos.phi == 90)
+        // {
+        //     static int debugRayCounter = 0;
 
-            if (debugRayCounter < 40)
-            {
-                std::cout << "DEBUG RAY "
-                          << "angle=" << laserData[k].scanAngle
-                          << " realPx=" << realDistancePx
-                          << " simPx=" << simulatedDistancePx
-                          << " diff=" << diff
-                          << " diff2=" << diff * diff
-                          << std::endl;
+        //     if (debugRayCounter < 40)
+        //     {
+        //         std::cout << "DEBUG RAY " << "angle=" << laserData[k].scanAngle << " realPx=" << realDistancePx << " simPx=" << simulatedDistancePx << " diff=" << diff << " diff2=" << diff * diff << std::endl;
 
-                debugRayCounter++;
-            }
-        }
-        // DEBUG: vypis iba pre predpokladanu skutocnu polohu robota
+        //         debugRayCounter++;
+        //     }
+        // }
+        // // DEBUG: vypis iba pre predpokladanu skutocnu polohu robota
     }
 
     if (usedRays == 0)
         return 1e9;
 
-    if (pos.x == 140 && pos.y == 140 && pos.phi == 90)
-    {
-        std::cout << "DEBUG TRUE PARTICLE AVG ERROR = "
-                  << error / usedRays
-                  << " usedRays=" << usedRays
-                  << std::endl;
-    }
+    // if (pos.x == 140 && pos.y == 140 && pos.phi == 90)
+    // {
+    //     std::cout << "DEBUG TRUE PARTICLE AVG ERROR = "
+    //               << error / usedRays
+    //               << " usedRays=" << usedRays
+    //               << std::endl;
+    // }
 
 
     return error / usedRays;
 }
 double robot::errorToWeight(double error)
 {
-    double sigma = 20.0;
-    return exp(-error / (2.0 * sigma * sigma));
+    return 1.0 / (1.0 + error);
 }
 
 void robot::updateWeights(std::vector<PotentialPosition>& potentialPositions, const std::vector<LaserData>& laserData){
@@ -1369,7 +1368,6 @@ void robot::updateWeights(std::vector<PotentialPosition>& potentialPositions, co
         pos.weight /= weightSum;
     }
 }
-
 
 
 bool robot::isInsideMap(int x, int y)
@@ -1476,8 +1474,6 @@ void robot::resampleParticles(std::vector<PotentialPosition>& potentialPositions
             {
                 PotentialPosition selected = particle;
 
-                addNoiseToParticle(selected);
-
                 selected.weight = 1.0 / numberOfParticles;
 
                 newParticles.push_back(selected);
@@ -1490,7 +1486,6 @@ void robot::resampleParticles(std::vector<PotentialPosition>& potentialPositions
     while (newParticles.size() < numberOfParticles)
     {
         PotentialPosition selected = potentialPositions.back();
-        addNoiseToParticle(selected);
         selected.weight = 1.0 / numberOfParticles;
         newParticles.push_back(selected);
     }
@@ -1557,7 +1552,8 @@ void robot::initMonteCarloLocalization()
     int mapWidth = MAP_SIZE_METERS * PIXEL_PER_METER;
     int mapHeight = MAP_SIZE_METERS * PIXEL_PER_METER;
 
-    int numOfParticles = 3000;
+    int numOfParticles = 2000;
+    lastRobotPoseInitialized = false;
 
     generatePotentialPositions(potentialPositions,mapWidth,mapHeight,numOfParticles);
 
@@ -1566,9 +1562,7 @@ void robot::initMonteCarloLocalization()
     // addDebugParticle(140, 140, 90);
     // addDebugParticle(139, 139, 90);
 
-    std::cout << "MCL initialized: "
-              << potentialPositions.size()
-              << " particles" << std::endl;
+    std::cout << "MCL initialized: " << potentialPositions.size() << " particles" << std::endl;
 
 }
 
@@ -1584,35 +1578,52 @@ void robot::monteCarloTestStep(const std::vector<LaserData>& laserData)
     moveParticlesByOdometry();
 
     updateWeights(potentialPositions, laserData);
-    printBestErrors(10);
+    // printBestErrors(10);
 
     PotentialPosition best = getBestParticle();
 
-    std::cout << "MCL best before resampling: "
-              << "x=" << best.x
-              << " y=" << best.y
-              << " phi=" << best.phi
-              << " weight=" << best.weight
-              << std::endl;
+    // std::cout << "MCL best before resampling: " << "x=" << best.x << " y=" << best.y << " phi=" << best.phi << " weight=" << best.weight << std::endl;
+
+    if (!pastPositions.empty())
+    {
+        Point realMapPoint = xyToMapTransform(pastPositions.back().pos);
+
+        double realPhi = normalizeAngleDeg(pastPositions.back().angle + 90.0);
+
+        std::cout << "===== MCL VS REAL =====" << std::endl;
+
+        std::cout << "MCL:  " << "x=" << best.x << " y=" << best.y << " phi=" << best.phi << " error=" << best.error << " weight=" << best.weight << std::endl;
+
+        std::cout << "REAL: " << "x=" << realMapPoint.x << " y=" << realMapPoint.y << " phi=" << realPhi << std::endl;
+
+        std::cout << "DIFF: " << "dx=" << best.x - realMapPoint.x << " dy=" << best.y - realMapPoint.y << " dPhi=" << normalizeAngleDeg(best.phi - realPhi) << std::endl;
+    }
 
     drawParticlesToMap();
 
     emit resetMap();
 
 
-    resampleParticles(potentialPositions);
+    resampleCounter++;
 
-    int randomCount = potentialPositions.size() * 0.05;
-
-    for (int i = 0; i < randomCount; i++)
+    if (resampleCounter % 1 == 0)
     {
-        potentialPositions.pop_back();
+        resampleParticles(potentialPositions);
+
+        int randomCount = potentialPositions.size() * 0.005;
+
+        for (int i = 0; i < randomCount && !potentialPositions.empty(); i++)
+        {
+            potentialPositions.pop_back();
+        }
+
+
+        int mapSize = MAP_SIZE_METERS * PIXEL_PER_METER;
+
+        generatePotentialPositions(potentialPositions, mapSize, mapSize, randomCount);
     }
-
-    int mapSize = MAP_SIZE_METERS * PIXEL_PER_METER;
-
-    generatePotentialPositions(potentialPositions, mapSize, mapSize, randomCount);
 }
+
 void robot::startMonteCarlo()
 {
     potentialPositions.clear();
@@ -1622,7 +1633,7 @@ void robot::startMonteCarlo()
     mclEnabled = true;
     mclCounter = 0;
 
-    std::cout << "Monte Carlo localization started automatically." << std::endl;
+    std::cout << "Monte Carlo localization started." << std::endl;
 }
 
 void robot::clearParticleVisualization()
@@ -1716,9 +1727,17 @@ void robot::printBestErrors(int count)
 
 void robot::moveParticlesByOdometry()
 {
-    double currentRobotX = pastPositions.back().pos.x;
-    double currentRobotY = pastPositions.back().pos.y;
-    double currentRobotPhi = pastPositions.back().angle + 90.0;
+
+    if (pastPositions.empty())
+        return;
+
+    Point currentMapPoint = xyToMapTransform(pastPositions.back().pos);
+
+    double currentRobotX = currentMapPoint.x;
+    double currentRobotY = currentMapPoint.y;
+
+    // MCL phi ma offset +90, lebo spravna startovacia castica bola phi=90
+    double currentRobotPhi = normalizeAngleDeg(pastPositions.back().angle + 90.0);
 
     if (!lastRobotPoseInitialized)
     {
@@ -1735,19 +1754,51 @@ void robot::moveParticlesByOdometry()
     double distance = sqrt(dx * dx + dy * dy);
     double dPhi = normalizeAngleDeg(currentRobotPhi - lastRobotPhi);
 
+    // std::cout << "ODOM MOVE: " << "dx=" << dx << " dy=" << dy << " distance=" << distance << " dPhi=" << dPhi << " currentPhi=" << currentRobotPhi << std::endl;
+
+    // Ak robot skoro stoji, nehýb casticami vôbec
+    if (distance < 0.5 && std::abs(dPhi) < 1.0)
+    {
+        lastRobotX = currentRobotX;
+        lastRobotY = currentRobotY;
+        lastRobotPhi = currentRobotPhi;
+        return;
+    }
+
+    // Pri rotacii ignoruj male odometricke posuny
+    double translationThreshold = 1.0;
+
+    if (std::abs(dPhi) > 2.0)
+    {
+        translationThreshold = 3.0;
+    }
+
     for (auto& p : potentialPositions)
     {
-        p.phi = normalizeAngleDeg(p.phi + dPhi);
+        // 1. rotacia
+        if (std::abs(dPhi) >= 1.0)
+        {
+            p.phi = normalizeAngleDeg(p.phi + dPhi);
 
-        double angleRad = (p.phi - 90.0) * M_PI / 180.0;
+            int angleNoise = 2;
+            p.phi = normalizeAngleDeg(
+                p.phi + ((rand() % (2 * angleNoise + 1)) - angleNoise)
+                );
+        }
 
-        p.x += cos(angleRad) * distance;
-        p.y -= sin(angleRad) * distance;
+        // 2. translacia iba ak je naozaj vyznamna
+        if (distance >= translationThreshold)
+        {
+            double angleRad = (p.phi - 90.0) * M_PI / 180.0;
 
-        // šum pohybu
-        p.x += (rand() % 5) - 2;
-        p.y += (rand() % 5) - 2;
-        p.phi = normalizeAngleDeg(p.phi + ((rand() % 7) - 3));
+            p.x += cos(angleRad) * distance;
+            p.y -= sin(angleRad) * distance;
+
+            int posNoise = 2;
+
+            p.x += (rand() % (2 * posNoise + 1)) - posNoise;
+            p.y += (rand() % (2 * posNoise + 1)) - posNoise;
+        }
 
         if (!isInsideMap(p.x, p.y) || map[p.x][p.y] != 0)
         {

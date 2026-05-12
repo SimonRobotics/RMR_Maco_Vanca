@@ -105,6 +105,7 @@ private:
     double lastRobotX = 0.0;
     double lastRobotY = 0.0;
     double lastRobotPhi = 0.0;
+    int resampleCounter = 0;
     bool lastRobotPoseInitialized = false;
   void addDebugParticle(int x, int y, double phi);
     void printBestErrors(int count);
