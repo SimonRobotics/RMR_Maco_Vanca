@@ -1843,8 +1843,8 @@ void robot::overwriteOdometryFromMonteCarlo(const PotentialPosition& best)
         return;
 
     // Prahy na ladenie
-    double maxAcceptedError = 10000.0;
-    double maxPositionJumpPx = 10000.0; // 25 px = 1.25 m pri 20 px/m
+    double maxAcceptedError = 450.0;
+    double maxPositionJumpPx = 1000.0; // 25 px = 1.25 m pri 20 px/m
     double maxPhiJumpDeg = 180.0;
 
     Point odomMapPoint = xyToMapTransform(pastPositions.back().pos);
@@ -1887,7 +1887,7 @@ void robot::overwriteOdometryFromMonteCarlo(const PotentialPosition& best)
     Position correctedPos = mapToXYTransform(bestPoint);
 
     pastPositions.back().pos = correctedPos;
-    pastPositions.back().angle = normalizeAngleDeg(best.phi - 90.0);
+    // pastPositions.back().angle = normalizeAngleDeg(best.phi - 90.0);
 
     Point correctedMapPoint = xyToMapTransform(pastPositions.back().pos);
 
@@ -1896,8 +1896,11 @@ void robot::overwriteOdometryFromMonteCarlo(const PotentialPosition& best)
     lastRobotPhi = normalizeAngleDeg(pastPositions.back().angle + 90.0);
     lastRobotPoseInitialized = true;
 
-    createCostmap = true;
-    navigation = true;
+    if (positionDiff > 5.0)
+    {
+        createCostmap = true;
+        navigation = true;
+    }
 
     std::cout << "MCL ODOM OVERWRITE ACCEPTED: "
               << "x=" << correctedPos.x
