@@ -250,6 +250,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     TimePosition.pos.x = pastPositions.back().pos.x + lenghtTraveled * std::cos(a); //m
     TimePosition.pos.y = pastPositions.back().pos.y + lenghtTraveled * std::sin(a); //m
 
+
     pastPositions.push_back(TimePosition);
 
     if (state == 1 | state == 2){
@@ -1612,6 +1613,8 @@ void robot::monteCarloTestStep(const std::vector<LaserData>& laserData)
     lastBestParticle = best;
     hasLastBestParticle = true;
 
+    overwriteOdometryFromMonteCarlo(best);
+
     // std::cout << "MCL best before resampling: " << "x=" << best.x << " y=" << best.y << " phi=" << best.phi << " weight=" << best.weight << std::endl;
 
     if (!pastPositions.empty())
@@ -1637,7 +1640,7 @@ void robot::monteCarloTestStep(const std::vector<LaserData>& laserData)
     {
         resampleParticles(potentialPositions);
 
-        int randomCount = potentialPositions.size() * 0.005;
+        int randomCount = potentialPositions.size() * 0.001;
 
         for (int i = 0; i < randomCount && !potentialPositions.empty(); i++)
         {
@@ -1832,6 +1835,76 @@ void robot::moveParticlesByOdometry()
     lastRobotX = currentRobotX;
     lastRobotY = currentRobotY;
     lastRobotPhi = currentRobotPhi;
+}
+
+void robot::overwriteOdometryFromMonteCarlo(const PotentialPosition& best)
+{
+    if (pastPositions.empty())
+        return;
+
+    // Prahy na ladenie
+    double maxAcceptedError = 10000.0;
+    double maxPositionJumpPx = 10000.0; // 25 px = 1.25 m pri 20 px/m
+    double maxPhiJumpDeg = 180.0;
+
+    Point odomMapPoint = xyToMapTransform(pastPositions.back().pos);
+    double odomPhiMcl = normalizeAngleDeg(pastPositions.back().angle + 90.0);
+
+    double dx = best.x - odomMapPoint.x;
+    double dy = best.y - odomMapPoint.y;
+    double positionDiff = sqrt(dx * dx + dy * dy);
+
+    double phiDiff = std::abs(normalizeAngleDeg(best.phi - odomPhiMcl));
+
+    bool errorIsGood = best.error < maxAcceptedError;
+    bool jumpIsReasonable = positionDiff < maxPositionJumpPx && phiDiff < maxPhiJumpDeg;
+
+    std::cout << "MCL FILTER DEBUG: "
+              << "best.error=" << best.error
+              << " maxAcceptedError=" << maxAcceptedError
+              << " errorIsGood=" << errorIsGood
+              << " positionDiff=" << positionDiff
+              << " maxPositionJumpPx=" << maxPositionJumpPx
+              << " phiDiff=" << phiDiff
+              << " maxPhiJumpDeg=" << maxPhiJumpDeg
+              << " jumpIsReasonable=" << jumpIsReasonable
+              << std::endl;
+
+    if (!errorIsGood || !jumpIsReasonable)
+    {
+        std::cout << "MCL ODOM OVERWRITE REJECTED: "
+                  << "error=" << best.error
+                  << " posDiff=" << positionDiff
+                  << " phiDiff=" << phiDiff
+                  << std::endl;
+        return;
+    }
+
+    Point bestPoint;
+    bestPoint.x = best.x;
+    bestPoint.y = best.y;
+
+    Position correctedPos = mapToXYTransform(bestPoint);
+
+    pastPositions.back().pos = correctedPos;
+    pastPositions.back().angle = normalizeAngleDeg(best.phi - 90.0);
+
+    Point correctedMapPoint = xyToMapTransform(pastPositions.back().pos);
+
+    lastRobotX = correctedMapPoint.x;
+    lastRobotY = correctedMapPoint.y;
+    lastRobotPhi = normalizeAngleDeg(pastPositions.back().angle + 90.0);
+    lastRobotPoseInitialized = true;
+
+    createCostmap = true;
+    navigation = true;
+
+    std::cout << "MCL ODOM OVERWRITE ACCEPTED: "
+              << "x=" << correctedPos.x
+              << " y=" << correctedPos.y
+              << " angle=" << pastPositions.back().angle
+              << " error=" << best.error
+              << std::endl;
 }
 
 

@@ -104,7 +104,16 @@ signals:
 #endif
 private:
   /// toto su vase premenne na vasu odometriu
+    double globalMapX = 0.0;
+    double globalMapY = 0.0;
+    double globalMapPhi = 90.0;
+    bool globalPoseInitialized = false;
 
+    void updateGlobalPoseFromMonteCarlo(const PotentialPosition& best);
+    void overwriteOdometryFromMonteCarlo(const PotentialPosition& best);
+    Position getGlobalPositionMeters();
+    double getGlobalAngleDeg();
+    Point getGlobalMapPoint();
     double lastRobotX = 0.0;
     double lastRobotY = 0.0;
     double lastRobotPhi = 0.0;
