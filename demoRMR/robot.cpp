@@ -103,6 +103,40 @@ std::vector<Point> robot::getCostMap()
     return mm;
 }
 
+std::vector<Point> robot::getParticlePoints()
+{
+    std::vector<Point> points;
+
+    for (const auto& p : potentialPositions)
+    {
+        if (!isInsideMap(p.x, p.y))
+            continue;
+
+        Point point;
+        point.x = p.x;
+        point.y = p.y;
+
+        points.push_back(point);
+    }
+
+    return points;
+}
+Point robot::getBestParticlePoint()
+{
+    Point point;
+    point.x = -1;
+    point.y = -1;
+
+    if (potentialPositions.empty())
+        return point;
+
+    point.x = lastBestParticle.x;
+    point.y = lastBestParticle.y;
+
+    return point;
+}
+
+
 void robot::loadMap(QString fileName)
 {
     QFile file(fileName);
@@ -201,7 +235,6 @@ int robot::processThisRobot(const TKobukiData &robotdata)
         // generatePotentialPositions(potentialPositions, 1000, 500, 700);
 
         robot::initParam = true;
-        // moveParticlesByOdometry();
 
     }
 
@@ -225,7 +258,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
 
             double dis_e = robot::calculateDistanceError(target, pastPositions.back().pos.x, pastPositions.back().pos.y);
 
-            if (0.1 > dis_e){
+            if (0.2 > dis_e){
                 forwardspeed = 0;
                 rotationspeed = 0;
                 position_list.pop_front();
@@ -328,7 +361,7 @@ int robot::processThisRobot(const TKobukiData &robotdata)
     }
     if(state == 2){
         if(createCostmap){
-            createCostMap(5);
+            createCostMap(7);
             createCostmap = false;
         }
         if(navigation && !position_list.empty()){
@@ -695,7 +728,7 @@ int robot::processThisLidar(const std::vector<LaserData>& laserData)
 
     mclCounter++;
 
-    if (!potentialPositions.empty()/* && mclCounter % 2 == 0*/)
+    if (!potentialPositions.empty() && mclCounter % 5 == 0)
     {
         monteCarloTestStep(laserData);
     }
@@ -1287,11 +1320,9 @@ double robot::calculateParticleError(const PotentialPosition& pos, const std::ve
     {
         double distMm = laserData[k].scanDistance;
 
-        if (distMm < 100)
-            continue;
+        if (distMm < 100)continue;
 
-        if (distMm > 10000)
-            continue;
+        if (distMm > 10000)continue;
 
         double realDistancePx = laserData[k].scanDistance / 1000.0 * PIXEL_PER_METER;
 
@@ -1351,7 +1382,7 @@ void robot::updateWeights(std::vector<PotentialPosition>& potentialPositions, co
         weightSum += pos.weight;
     }
 
-    if (weightSum <= 0.0)
+    if (weightSum == 0.0)
     {
         double uniformWeight = 1.0 / potentialPositions.size();
 
@@ -1481,8 +1512,6 @@ void robot::resampleParticles(std::vector<PotentialPosition>& potentialPositions
             }
         }
     }
-
-    // poistka, ak by kvoli zaokruhleniu nebola vybrata posledna castica
     while (newParticles.size() < numberOfParticles)
     {
         PotentialPosition selected = potentialPositions.back();
@@ -1557,8 +1586,6 @@ void robot::initMonteCarloLocalization()
 
     generatePotentialPositions(potentialPositions,mapWidth,mapHeight,numOfParticles);
 
-
-
     // addDebugParticle(140, 140, 90);
     // addDebugParticle(139, 139, 90);
 
@@ -1568,7 +1595,7 @@ void robot::initMonteCarloLocalization()
 
 void robot::monteCarloTestStep(const std::vector<LaserData>& laserData)
 {
-    clearParticleVisualization();
+    // clearParticleVisualization();
 
     if (potentialPositions.empty())
     {
@@ -1582,6 +1609,9 @@ void robot::monteCarloTestStep(const std::vector<LaserData>& laserData)
 
     PotentialPosition best = getBestParticle();
 
+    lastBestParticle = best;
+    hasLastBestParticle = true;
+
     // std::cout << "MCL best before resampling: " << "x=" << best.x << " y=" << best.y << " phi=" << best.phi << " weight=" << best.weight << std::endl;
 
     if (!pastPositions.empty())
@@ -1590,16 +1620,13 @@ void robot::monteCarloTestStep(const std::vector<LaserData>& laserData)
 
         double realPhi = normalizeAngleDeg(pastPositions.back().angle + 90.0);
 
-        std::cout << "===== MCL VS REAL =====" << std::endl;
-
+        std::cout << " MCL VS REAL " << std::endl;
         std::cout << "MCL:  " << "x=" << best.x << " y=" << best.y << " phi=" << best.phi << " error=" << best.error << " weight=" << best.weight << std::endl;
-
         std::cout << "REAL: " << "x=" << realMapPoint.x << " y=" << realMapPoint.y << " phi=" << realPhi << std::endl;
-
         std::cout << "DIFF: " << "dx=" << best.x - realMapPoint.x << " dy=" << best.y - realMapPoint.y << " dPhi=" << normalizeAngleDeg(best.phi - realPhi) << std::endl;
     }
 
-    drawParticlesToMap();
+    // drawParticlesToMap();
 
     emit resetMap();
 
@@ -1736,7 +1763,6 @@ void robot::moveParticlesByOdometry()
     double currentRobotX = currentMapPoint.x;
     double currentRobotY = currentMapPoint.y;
 
-    // MCL phi ma offset +90, lebo spravna startovacia castica bola phi=90
     double currentRobotPhi = normalizeAngleDeg(pastPositions.back().angle + 90.0);
 
     if (!lastRobotPoseInitialized)
@@ -1756,7 +1782,7 @@ void robot::moveParticlesByOdometry()
 
     // std::cout << "ODOM MOVE: " << "dx=" << dx << " dy=" << dy << " distance=" << distance << " dPhi=" << dPhi << " currentPhi=" << currentRobotPhi << std::endl;
 
-    // Ak robot skoro stoji, nehýb casticami vôbec
+
     if (distance < 0.5 && std::abs(dPhi) < 1.0)
     {
         lastRobotX = currentRobotX;
@@ -1765,7 +1791,6 @@ void robot::moveParticlesByOdometry()
         return;
     }
 
-    // Pri rotacii ignoruj male odometricke posuny
     double translationThreshold = 1.0;
 
     if (std::abs(dPhi) > 2.0)
@@ -1775,18 +1800,16 @@ void robot::moveParticlesByOdometry()
 
     for (auto& p : potentialPositions)
     {
-        // 1. rotacia
+        // rotacia
         if (std::abs(dPhi) >= 1.0)
         {
             p.phi = normalizeAngleDeg(p.phi + dPhi);
 
             int angleNoise = 2;
-            p.phi = normalizeAngleDeg(
-                p.phi + ((rand() % (2 * angleNoise + 1)) - angleNoise)
-                );
+            p.phi = normalizeAngleDeg(p.phi + ((rand() % (2 * angleNoise + 1)) - angleNoise));
         }
 
-        // 2. translacia iba ak je naozaj vyznamna
+        // translacia
         if (distance >= translationThreshold)
         {
             double angleRad = (p.phi - 90.0) * M_PI / 180.0;

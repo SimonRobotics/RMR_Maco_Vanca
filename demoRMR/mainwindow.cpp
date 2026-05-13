@@ -18,7 +18,7 @@ MainWindow::MainWindow(QWidget *parent) :
 
     //tu je napevno nastavena ip. treba zmenit na to co ste si zadali do text boxu alebo nejaku inu pevnu. co bude spravna
     ipaddress="127.0.0.1";//192.168.1.11toto je na niektory realny robot.. na lokal budete davat "127.0.0.1"
-    //ipaddress="192.168.1.15";
+    // ipaddress="192.168.1.13";
     ui->setupUi(this);
 
     mapSizeMeters = 14;
@@ -280,23 +280,32 @@ int MainWindow::paintThisLidar(const std::vector<LaserData> &laserData)
 
 void MainWindow::paintWaypoints(QQueue<Position> waypointList)
 {
+    lastWaypointList = waypointList;
+    repaintMap();
+}
+
+void MainWindow::drawWaypointsLayer()
+{
     QPainter painter(&mapPixmap);
     painter.setPen(Qt::yellow);
 
     int sizePx = mapSizeMeters * pixelsPerMeter;
 
-    while(!waypointList.empty()){
+    QQueue<Position> waypointList = lastWaypointList;
 
+    while (!waypointList.empty())
+    {
         int px = waypointList.front().x * pixelsPerMeter;
         int py = waypointList.front().y * pixelsPerMeter;
 
         px += sizePx / 2;
         py = sizePx / 2 - py;
 
-        if(px >= 0 && px < sizePx && py >= 0 && py < sizePx)
+        if (px >= 0 && px < sizePx && py >= 0 && py < sizePx)
         {
             painter.drawEllipse(px, py, 1, 1);
         }
+
         waypointList.pop_front();
     }
 }
@@ -306,6 +315,26 @@ void MainWindow::repaintMap()
     mapPixmap.fill(Qt::black);
     paintMap(_robot.getMap());
     paintPoints(_robot.getCostMap(),Qt::gray);
+
+
+
+    // Monte Carlo particles - iba vizualizacia, nezasahuje do map[][]
+    paintPoints(_robot.getParticlePoints(), Qt::blue);
+
+    Point best = _robot.getBestParticlePoint();
+
+    if (best.x >= 0 && best.y >= 0)
+    {
+        std::vector<Point> bestPoint;
+        bestPoint.push_back(best);
+
+        paintPoints(bestPoint, Qt::red);
+    }
+
+    drawWaypointsLayer();
+
+    update();
+
 }
 
 void MainWindow::paintMap(std::vector<Point> mapList)

@@ -84,6 +84,8 @@ public:
   void addWaypoint(double x, double y);
   std::vector<Point> getMap();
   std::vector<Point> getCostMap();
+  std::vector<Point> getParticlePoints();
+  Point getBestParticlePoint();
   void loadMap(QString fileName);
   void saveMap();
 
@@ -102,10 +104,13 @@ signals:
 #endif
 private:
   /// toto su vase premenne na vasu odometriu
+
     double lastRobotX = 0.0;
     double lastRobotY = 0.0;
     double lastRobotPhi = 0.0;
     int resampleCounter = 0;
+    PotentialPosition lastBestParticle;
+    bool hasLastBestParticle = false;
     bool lastRobotPoseInitialized = false;
   void addDebugParticle(int x, int y, double phi);
     void printBestErrors(int count);
