@@ -28,7 +28,7 @@ Q_DECLARE_METATYPE(std::vector<LaserData>)
 
 #define TICK_TO_METER 0.000085292090497737556558
 #define MAX_SPEED 300 //mm / s
-#define MAX_SPEED_ANG 0.6 //stupen / s
+#define MAX_SPEED_ANG 0.4 //stupen / s 0.6
 #define MAP_SIZE_METERS 14//m
 #define PIXEL_PER_METER 20// px / m
 #define ROBOT_SIZE_MM 350 /mm

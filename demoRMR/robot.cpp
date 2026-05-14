@@ -1193,7 +1193,7 @@ double robot::selectBestCandidate(const std::vector<double>& candidates,
     if (candidates.empty())
         return currentDirection;
 
-    double wg = 2.0;   // ciel
+    double wg = 10.0;   // ciel
     double wc = 1.0;   // aktualny smer
     double wp = 0.8;   // predchadzajuci vyber
 
