@@ -1414,31 +1414,26 @@ void robot::fillOutsideMazeAsWalls()
 
     QQueue<Point> queue;
 
-    // 1. Do fronty vlozime vsetky volne bunky na okrajoch mapy
     for (int i = 0; i < size; i++)
     {
-        // horny okraj
         if (map[i][0] == 0)
         {
             map[i][0] = -99;
             queue.push_back({i, 0});
         }
 
-        // dolny okraj
         if (map[i][size - 1] == 0)
         {
             map[i][size - 1] = -99;
             queue.push_back({i, size - 1});
         }
 
-        // lavy okraj
         if (map[0][i] == 0)
         {
             map[0][i] = -99;
             queue.push_back({0, i});
         }
 
-        // pravy okraj
         if (map[size - 1][i] == 0)
         {
             map[size - 1][i] = -99;
@@ -1446,7 +1441,6 @@ void robot::fillOutsideMazeAsWalls()
         }
     }
 
-    // 2. Flood-fill cez 4-susednost
     int dx[4] = { 1, -1, 0, 0 };
     int dy[4] = { 0, 0, 1, -1 };
 
@@ -1471,7 +1465,6 @@ void robot::fillOutsideMazeAsWalls()
         }
     }
 
-    // 3. Vsetky bunky dosiahnutelne zvonku prepiseme na steny
     for (int x = 0; x < size; x++)
     {
         for (int y = 0; y < size; y++)
